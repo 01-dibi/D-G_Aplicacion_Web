@@ -1,15 +1,9 @@
 
 export enum OrderStatus {
   PENDING = 'PENDIENTE',
-  COMPLETED = 'COMPLETADO',
-  DISPATCHED = 'DESPACHO',
-  ARCHIVED = 'ARCHIVADO'
-}
-
-export interface OrderItem {
-  id: string;
-  name: string;
-  quantity: number;
+  COMPLETED = 'PREPARADO',
+  DISPATCHED = 'DESPACHADO',
+  ARCHIVED = 'FINALIZADO'
 }
 
 export interface PackagingEntry {
@@ -19,30 +13,19 @@ export interface PackagingEntry {
   quantity: number;
 }
 
-export interface Packaging {
-  bolsas: number;
-  bultos: number;
-  cajas: number;
-}
-
 export interface Order {
   id: string;
   orderNumber: string;
-  customerNumber?: string; // Nuevo campo para número de cliente
+  customerNumber: string; 
   customerName: string;
-  locality?: string;
-  items: OrderItem[];
+  locality: string;
   status: OrderStatus;
-  packaging: Packaging; 
   detailedPackaging?: PackagingEntry[];
-  location?: string;
   reviewer?: string;
-  notes?: string; 
+  notes: string; // Instrucciones de despacho y logística únicamente
   carrier?: string; 
   createdAt: string;
-  source: 'Correo' | 'WhatsApp' | 'Manual';
-  sourceDetail?: string;
-  lockedBy?: string; 
+  source: 'IA' | 'Manual';
 }
 
-export type View = 'DASHBOARD' | 'PENDING' | 'COMPLETED' | 'DISPATCHED' | 'NEW_ORDER' | 'NEW_ORDER_MANUAL' | 'ALL' | 'GENERAL_ENTRY' | 'TRACKING';
+export type View = 'DASHBOARD' | 'PENDING' | 'COMPLETED' | 'DISPATCHED' | 'NEW_ORDER_MANUAL' | 'ALL' | 'TRACKING';

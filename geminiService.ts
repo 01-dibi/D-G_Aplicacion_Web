@@ -1,7 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Acceso a la API_KEY inyectada por el entorno
 const apiKey = process.env.API_KEY || '';
 
 export async function analyzeOrderText(text: string) {
@@ -14,26 +13,19 @@ export async function analyzeOrderText(text: string) {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Analiza este pedido de un bazar y extrae únicamente el nombre del cliente y los artículos con sus cantidades en formato JSON. Texto: "${text}"`,
+      contents: `Analiza el siguiente texto de un pedido. EXTRAE ÚNICAMENTE el nombre del cliente y la localidad. 
+      IMPORTANTE: Ignora por completo cualquier lista de productos, artículos o mercadería. No incluyas detalles de qué contiene el pedido.
+      
+      Texto a analizar: "${text}"`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
             customerName: { type: Type.STRING },
-            items: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  quantity: { type: Type.NUMBER }
-                },
-                required: ["name", "quantity"]
-              }
-            }
+            locality: { type: Type.STRING, description: "Ciudad o localidad del cliente" }
           },
-          required: ["customerName", "items"]
+          required: ["customerName", "locality"]
         }
       }
     });
