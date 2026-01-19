@@ -810,12 +810,13 @@ function Step({ status, active, done, date }: any) {
 }
 
 function NewOrderForm({ onAdd, onBack, reviewer }: any) {
-  const [form, setForm] = useState({ nro: '', name: '', locality: '', notes: '' });
+  const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
+  
   const submit = () => {
-    if(!form.nro || !form.name) return alert("Faltan datos obligatorios");
+    if(!form.orderNumber || !form.nro || !form.name) return alert("Faltan datos obligatorios: Nº de Orden, Cliente y Razón Social son requeridos.");
     onAdd({
       id: Date.now().toString(),
-      orderNumber: `DG-${Math.floor(Math.random()*9000)+1000}`,
+      orderNumber: form.orderNumber.toUpperCase(),
       customerNumber: form.nro,
       customerName: form.name.toUpperCase(),
       locality: form.locality.toUpperCase() || 'GENERAL',
@@ -826,6 +827,7 @@ function NewOrderForm({ onAdd, onBack, reviewer }: any) {
       reviewer
     });
   };
+
   return (
     <div className="space-y-6 animate-in slide-in-from-right">
       <div className="flex items-center gap-4">
@@ -833,12 +835,26 @@ function NewOrderForm({ onAdd, onBack, reviewer }: any) {
         <h2 className="font-black text-xl italic uppercase tracking-tighter text-slate-800">Carga de Envío</h2>
       </div>
       <div className="bg-white p-8 rounded-[40px] border-2 border-slate-100 space-y-4">
+        <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
         <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="Ej: 1450" />
         <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre completo" />
         <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="Destino" />
-        <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none min-h-[100px] border-2 border-transparent focus:border-teal-500 transition-all" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones logísticas..." />
+        <div className="space-y-2">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Notas de Despacho</label>
+          <textarea 
+            className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-bold outline-none min-h-[100px] border-2 border-transparent focus:border-teal-500 transition-all" 
+            value={form.notes} 
+            onChange={e=>setForm({...form, notes: e.target.value})} 
+            placeholder="Instrucciones logísticas..." 
+          />
+        </div>
       </div>
-      <button onClick={submit} className="w-full bg-slate-900 text-white py-6 rounded-[24px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all">INGRESAR A LOGÍSTICA</button>
+      <button 
+        onClick={submit} 
+        className="w-full bg-slate-900 text-white py-6 rounded-[24px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
+      >
+        INGRESAR A LOGÍSTICA
+      </button>
     </div>
   );
 }
@@ -918,5 +934,5 @@ function CustomerPortal({ onBack, orders }: { onBack: () => void, orders: Order[
 }
 
 const INITIAL_ORDERS: Order[] = [
-  { id: '1', orderNumber: 'DG-1025', customerNumber: '1450', customerName: 'BAZAR AVENIDA', locality: 'FIRMAT', status: OrderStatus.PENDING, notes: 'Enviar por Transporte Smith.', createdAt: new Date().toISOString(), source: 'Manual', reviewer: 'Sistema' }
+  { id: '1', orderNumber: '1025', customerNumber: '1450', customerName: 'BAZAR AVENIDA', locality: 'FIRMAT', status: OrderStatus.PENDING, notes: 'Enviar por Transporte Smith.', createdAt: new Date().toISOString(), source: 'Manual', reviewer: 'Sistema' }
 ];
