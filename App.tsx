@@ -5,31 +5,10 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal, Info
+  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types';
-import { supabase } from './supabaseClient';
-
-/**
- * SQL DEFINITIVO PARA REPARAR LA BASE DE DATOS:
- * (Este código borra la tabla vieja y crea la nueva con permisos totales)
- * 
- * DROP TABLE IF EXISTS orders;
- * CREATE TABLE orders (
- *   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
- *   order_number text NOT NULL,
- *   customer_number text,
- *   customer_name text NOT NULL,
- *   locality text DEFAULT 'GENERAL',
- *   status text DEFAULT 'PENDIENTE',
- *   notes text,
- *   source text DEFAULT 'Manual',
- *   reviewer text,
- *   created_at timestamp with time zone DEFAULT now()
- * );
- * ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
- * CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);
- */
+import { supabase, isConfigValid } from './supabaseClient';
 
 export default function App() {
   const [isCustomerMode, setIsCustomerMode] = useState(false);
@@ -80,7 +59,7 @@ export default function App() {
 
       setOrders(mappedData);
     } catch (error: any) {
-      console.error("Error al cargar:", error);
+      console.error("Fetch Error:", error);
       setDbError({ message: error.message, code: error.code });
     } finally {
       setIsLoading(false);
@@ -149,9 +128,12 @@ export default function App() {
   };
 
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
+    if (!isConfigValid) {
+      return alert("❌ ERROR CRÍTICO: No se detectó la clave de Supabase. Revisa las variables de entorno VITE_SUPABASE_ANON_KEY.");
+    }
+
     setIsSaving(true);
     try {
-      // FORZAR SNAKE_CASE PARA COMPATIBILIDAD CON SQL
       const payload = {
         order_number: newOrderData.orderNumber,
         customer_number: String(newOrderData.customerNumber),
@@ -165,18 +147,19 @@ export default function App() {
 
       const { error } = await supabase.from('orders').insert([payload]);
 
-      if (error) {
-        throw new Error(error.message);
-      }
+      if (error) throw error;
 
       setIsNewOrderModalOpen(false);
       setView('PENDING');
       await fetchOrders();
-      alert("✅ Pedido confirmado con éxito.");
+      alert("✅ Pedido confirmado y guardado correctamente.");
     } catch (err: any) {
-      console.error("Save Error:", err);
-      alert(`❌ ERROR DE CARGA: ${err.message}\n\nPASO A SEGUIR: Haz clic en el botón rojo 'Reparar DB' en el Dashboard y sigue las instrucciones.`);
-      setDbError({ message: err.message });
+      console.error("Save error detail:", err);
+      const msg = err.code === '42P01' ? "La tabla 'orders' no existe." : 
+                  err.code === 'PGRST116' ? "Permisos insuficientes (RLS)." :
+                  err.message;
+      alert(`❌ ERROR AL GUARDAR: ${msg}`);
+      setDbError({ message: msg, code: err.code });
     } finally {
       setIsSaving(false);
     }
@@ -218,27 +201,45 @@ export default function App() {
 
       <header className="bg-slate-900 text-white p-6 rounded-b-[40px] shadow-xl flex justify-between items-center sticky top-0 z-50">
         <button onClick={() => setIsSidebarOpen(true)} className="p-2 bg-white/10 rounded-xl"><Menu size={20} /></button>
-        <h1 className="text-lg font-black tracking-tighter uppercase italic">D&G <span className="text-orange-500">Logistics</span></h1>
+        <div className="flex flex-col items-center">
+          <h1 className="text-lg font-black tracking-tighter uppercase italic leading-none">D&G <span className="text-orange-500">Logistics</span></h1>
+          <div className="flex items-center gap-1 mt-1">
+            {isConfigValid ? (
+              <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest"><Wifi size={8}/> Nube Conectada</span>
+            ) : (
+              <span className="flex items-center gap-1 text-[7px] font-black text-red-400 uppercase tracking-widest"><WifiOff size={8}/> Sin Conexión</span>
+            )}
+          </div>
+        </div>
         <div className="w-10 h-10 bg-teal-500 rounded-2xl flex items-center justify-center font-bold shadow-lg shadow-teal-500/20">{currentUser.name[0]}</div>
       </header>
 
       <main className="p-5 space-y-6">
+        {!isConfigValid && (
+          <div className="bg-orange-50 border-2 border-orange-200 p-6 rounded-[32px] space-y-3 animate-pulse">
+            <div className="flex items-center gap-3 text-orange-600">
+              <ShieldAlert size={24} />
+              <h4 className="font-black text-sm uppercase">Falta Configuración</h4>
+            </div>
+            <p className="text-[10px] text-orange-700 font-bold leading-relaxed">
+              La App no puede guardar datos porque falta la clave secreta de Supabase. 
+              Agrégala como variable de entorno <b>VITE_SUPABASE_ANON_KEY</b>.
+            </p>
+          </div>
+        )}
+
         {dbError && (
           <div className="bg-red-50 border-2 border-red-200 p-6 rounded-[32px] space-y-4 animate-in slide-in-from-top">
             <div className="flex items-start gap-4">
               <ServerCrash className="text-red-500 shrink-0" size={24} />
               <div>
-                <h4 className="font-black text-red-800 text-sm uppercase">Error Estructural Detectado</h4>
+                <h4 className="font-black text-red-800 text-sm uppercase">Fallo en Base de Datos</h4>
                 <p className="text-[10px] text-red-600 font-bold leading-relaxed">{dbError.message}</p>
               </div>
             </div>
-            <div className="bg-white/50 p-3 rounded-2xl flex items-center gap-3 border border-red-100">
-               <Info className="text-red-400 shrink-0" size={16} />
-               <p className="text-[9px] font-bold text-red-700 italic">La tabla 'orders' ya existe pero no es compatible. Debes borrarla y crearla de nuevo.</p>
-            </div>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={fetchOrders} className="bg-red-500 text-white py-3 rounded-2xl text-[9px] font-black uppercase shadow-lg">Reintentar</button>
-              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2 shadow-lg"><Terminal size={12}/> Reparar DB</button>
+              <button onClick={fetchOrders} className="bg-red-500 text-white py-3 rounded-2xl text-[9px] font-black uppercase">Reintentar</button>
+              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2"><Terminal size={12}/> Reparar DB</button>
             </div>
           </div>
         )}
@@ -247,14 +248,12 @@ export default function App() {
           <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[1000] p-6 flex flex-col items-center justify-center space-y-6">
             <button onClick={() => setShowSqlHelp(false)} className="absolute top-6 right-6 text-white/50"><X size={32}/></button>
             <div className="text-center text-white space-y-2">
-              <h2 className="text-2xl font-black italic">Reparar Tabla de Pedidos</h2>
-              <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest leading-relaxed">Esto borrará los datos actuales y creará la estructura correcta.</p>
+              <h2 className="text-2xl font-black italic">Reparar Estructura</h2>
+              <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest leading-relaxed">Usa este código si recibes errores de "column not found" o permisos.</p>
             </div>
-            <div className="w-full bg-slate-800 p-5 rounded-[32px] font-mono text-[9px] text-teal-400 border-2 border-teal-500/30 overflow-x-auto shadow-2xl">
-              <pre>{`-- 1. Borrar tabla vieja
-DROP TABLE IF EXISTS orders;
-
--- 2. Crear tabla nueva
+            <div className="w-full bg-slate-800 p-5 rounded-[32px] font-mono text-[9px] text-teal-400 border-2 border-teal-500/30 overflow-x-auto shadow-2xl relative">
+               <div className="absolute top-4 right-4 text-[7px] bg-teal-500/10 text-teal-500 px-2 py-1 rounded">SQL</div>
+              <pre>{`DROP TABLE IF EXISTS orders;
 CREATE TABLE orders (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   order_number text NOT NULL,
@@ -267,15 +266,13 @@ CREATE TABLE orders (
   reviewer text,
   created_at timestamp with time zone DEFAULT now()
 );
-
--- 3. Habilitar permisos
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre>
+CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre>
             </div>
             <button 
               onClick={() => {
-                navigator.clipboard.writeText(`DROP TABLE IF EXISTS orders; CREATE TABLE orders ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, order_number text NOT NULL, customer_number text, customer_name text NOT NULL, locality text DEFAULT 'GENERAL', status text DEFAULT 'PENDIENTE', notes text, source text DEFAULT 'Manual', reviewer text, created_at timestamp with time zone DEFAULT now() ); ALTER TABLE orders ENABLE ROW LEVEL SECURITY; CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`);
-                alert("Copiado. Pégalo en Supabase SQL Editor y dale a RUN.");
+                navigator.clipboard.writeText(`DROP TABLE IF EXISTS orders; CREATE TABLE orders ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, order_number text NOT NULL, customer_number text, customer_name text NOT NULL, locality text DEFAULT 'GENERAL', status text DEFAULT 'PENDIENTE', notes text, source text DEFAULT 'Manual', reviewer text, created_at timestamp with time zone DEFAULT now() ); ALTER TABLE orders ENABLE ROW LEVEL SECURITY; CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`);
+                alert("Copiado. Pégalo en SQL Editor y presiona RUN. Si sale 'Success. No rows returned' es que ya quedó bien.");
               }}
               className="w-full bg-teal-500 text-slate-900 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 shadow-xl"
             >
@@ -287,7 +284,7 @@ CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}
         {(isLoading || isSaving) && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Guardando en la nube...' : 'Sincronizando...'}</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Validando con Servidor...' : 'Sincronizando...'}</p>
           </div>
         )}
 
@@ -302,16 +299,17 @@ CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}
             
             <button 
               onClick={() => setIsNewOrderModalOpen(true)}
-              className="w-full bg-slate-900 text-white p-6 rounded-[32px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all"
+              disabled={!isConfigValid}
+              className={`w-full p-6 rounded-[32px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all ${!isConfigValid ? 'bg-slate-200 opacity-50' : 'bg-slate-900 text-white'}`}
             >
               <div className="w-12 h-12 bg-white/10 text-orange-500 rounded-2xl flex items-center justify-center">
                 <PlusSquare size={24} />
               </div>
               <div className="text-left">
-                <h4 className="font-black text-white uppercase tracking-tighter text-sm">CARGA DE ENVÍO</h4>
-                <p className="text-[10px] font-bold text-slate-400">Ingreso manual de nuevo pedido</p>
+                <h4 className="font-black uppercase tracking-tighter text-sm">CARGA DE ENVÍO</h4>
+                <p className="text-[10px] font-bold opacity-60">Nuevo pedido manual</p>
               </div>
-              <ChevronRight className="ml-auto text-slate-500" />
+              <ChevronRight className="ml-auto opacity-50" />
             </button>
           </div>
         )}
@@ -327,7 +325,7 @@ CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}
               <input 
                 type="text" 
                 placeholder="Buscar cliente..." 
-                className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none"
+                className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none focus:border-teal-500"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -336,7 +334,7 @@ CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}
               {filteredOrders.length > 0 ? filteredOrders.map(order => (
                 <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} allOrders={orders} />
               )) : (
-                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase">Sin pedidos registrados</p>
+                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase tracking-widest">Sin registros encontrados</p>
               )}
             </div>
           </div>
@@ -410,7 +408,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
           <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="1450" />
           <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="FIRMAT" />
         </div>
-        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre del Comercio" />
+        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Comercio / Cliente" />
         <div className="space-y-2">
           <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Notas / Transporte</label>
           <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
@@ -421,7 +419,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
         onClick={submit} 
         className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
       >
-        {isSaving ? <><Loader2 className="animate-spin" size={16}/> GUARDANDO...</> : 'CONFIRMAR INGRESO'}
+        {isSaving ? <><Loader2 className="animate-spin" size={16}/> CONFIRMANDO...</> : 'CONFIRMAR INGRESO'}
       </button>
     </div>
   );
@@ -436,7 +434,6 @@ function SidebarItem({ icon, label, active, onClick, danger }: any) {
   );
 }
 
-// Fix: Cast the second argument of React.cloneElement to any to resolve TS errors regarding 'size' property
 function StatCard({ count, label, color, icon, onClick }: any) {
   return (
     <button onClick={onClick} className={`${color} p-6 rounded-[32px] text-white flex flex-col justify-between h-40 text-left shadow-lg active:scale-95 transition-all overflow-hidden relative`}>
@@ -450,7 +447,6 @@ function StatCard({ count, label, color, icon, onClick }: any) {
   );
 }
 
-// Fix: Cast the second argument of React.cloneElement to any to resolve TS errors regarding 'size' property
 function NavBtn({ icon, active, onClick }: any) {
   return (
     <button onClick={onClick} className={`p-4 rounded-2xl transition-all ${active ? 'text-teal-500 bg-teal-50' : 'text-slate-300'}`}>
@@ -508,7 +504,7 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
           </div>
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
              <span className="text-[9px] font-black text-slate-400 uppercase">Notas</span>
-             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas adicionales"}</p>
+             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas"}</p>
           </div>
         </div>
 

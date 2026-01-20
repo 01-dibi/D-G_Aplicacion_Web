@@ -1,22 +1,25 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Intentamos obtener las variables de múltiples fuentes para máxima compatibilidad
 const getEnv = (name: string) => {
-  if (typeof window !== 'undefined' && (window as any).process?.env?.[name]) return (window as any).process.env[name];
+  // Intentar desde import.meta.env (Vite estándar)
   // @ts-ignore
-  return import.meta.env?.[name] || '';
+  if (import.meta.env && import.meta.env[name]) return import.meta.env[name];
+  
+  // Intentar desde process.env (Vercel/Node fallback)
+  // @ts-ignore
+  if (typeof process !== 'undefined' && process.env && process.env[name]) return process.env[name];
+  
+  return '';
 };
 
-// URL detectada por el string de conexión del usuario
 const PROJECT_ID = 'optyltslotiphigvceep';
 const FALLBACK_URL = `https://${PROJECT_ID}.supabase.co`;
 
 const supabaseUrl = getEnv('VITE_SUPABASE_URL') || FALLBACK_URL;
 const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
 
-if (!supabaseAnonKey) {
-  console.warn("⚠️ FALTA VITE_SUPABASE_ANON_KEY: La persistencia no funcionará hasta que configures la clave ANON en las variables de entorno.");
-}
+// Exportamos si la configuración es válida para mostrarlo en la UI
+export const isConfigValid = !!supabaseAnonKey && !supabaseAnonKey.includes('placeholder');
 
 export const supabase = createClient(
   supabaseUrl, 
