@@ -4,30 +4,11 @@ import {
   ChevronRight, Menu, X, ArrowLeft, Loader2, 
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
-  Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw
+  Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
+  Database, ServerCrash
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types';
 import { supabase } from './supabaseClient';
-
-/**
- * NOTA PARA EL USUARIO:
- * Si el error persiste, ejecute este SQL en el SQL EDITOR de Supabase:
- * 
- * CREATE TABLE IF NOT EXISTS orders (
- *   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
- *   orderNumber text,
- *   customerNumber text,
- *   customerName text,
- *   locality text,
- *   status text,
- *   notes text,
- *   source text,
- *   reviewer text,
- *   createdAt timestamp with time zone DEFAULT now()
- * );
- * ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
- * CREATE POLICY "Permitir todo a anon" ON orders FOR ALL USING (true) WITH CHECK (true);
- */
 
 export default function App() {
   const [isCustomerMode, setIsCustomerMode] = useState(false);
@@ -38,6 +19,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
+  const [dbError, setDbError] = useState<string | null>(null);
   
   const [currentUser, setCurrentUser] = useState<{ name: string } | null>(() => {
     try {
@@ -52,6 +34,7 @@ export default function App() {
 
   const fetchOrders = async () => {
     setIsLoading(true);
+    setDbError(null);
     try {
       const { data, error } = await supabase
         .from('orders')
@@ -60,8 +43,9 @@ export default function App() {
       
       if (error) throw error;
       setOrders(data || []);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error cargando órdenes:", error);
+      setDbError(error.message);
     } finally {
       setIsLoading(false);
     }
@@ -104,9 +88,9 @@ export default function App() {
     
     const lowSearch = searchTerm.toLowerCase();
     return base.filter(o => 
-      o.customerName.toLowerCase().includes(lowSearch) || 
-      o.customerNumber.includes(lowSearch) ||
-      o.locality.toLowerCase().includes(lowSearch)
+      (o.customerName?.toLowerCase() || '').includes(lowSearch) || 
+      (o.customerNumber || '').includes(lowSearch) ||
+      (o.locality?.toLowerCase() || '').includes(lowSearch)
     );
   }, [orders, view, searchTerm]);
 
@@ -127,8 +111,8 @@ export default function App() {
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
     setIsSaving(true);
     try {
-      // Intentamos insertar omitiendo el ID para que Supabase lo autogenere
-      const newOrder = {
+      // 1. Intentar con camelCase (estándar del SDK)
+      const payloadCamel = {
         orderNumber: newOrderData.orderNumber,
         customerNumber: String(newOrderData.customerNumber),
         customerName: newOrderData.customerName,
@@ -138,13 +122,14 @@ export default function App() {
         reviewer: newOrderData.reviewer || 'Sistema',
         source: 'Manual'
       };
-      
-      const { error, data } = await supabase.from('orders').insert([newOrder]).select();
-      
-      if (error) {
-        console.error("Error detallado de Supabase:", error);
-        // Si falla, puede ser porque las columnas están en snake_case en la DB
-        const snakeCaseOrder = {
+
+      const { error: errorCamel } = await supabase.from('orders').insert([payloadCamel]);
+
+      if (errorCamel) {
+        console.warn("Fallo inserción camelCase, intentando snake_case...", errorCamel);
+        
+        // 2. Intentar con snake_case (estándar Postgres/Supabase si se creó vía SQL)
+        const payloadSnake = {
           order_number: newOrderData.orderNumber,
           customer_number: String(newOrderData.customerNumber),
           customer_name: newOrderData.customerName,
@@ -154,20 +139,26 @@ export default function App() {
           reviewer: newOrderData.reviewer || 'Sistema',
           source: 'Manual'
         };
-        
-        const { error: error2 } = await supabase.from('orders').insert([snakeCaseOrder]);
-        
-        if (error2) {
-          throw new Error(`Error en base de datos: ${error2.message} (Código: ${error2.code}). Verifique que la tabla 'orders' tenga las columnas correctas.`);
+
+        const { error: errorSnake } = await supabase.from('orders').insert([payloadSnake]);
+
+        if (errorSnake) {
+          // Si ambos fallan, el problema es estructural
+          let msg = `Error crítico al guardar: ${errorSnake.message}. `;
+          if (errorSnake.code === '42P01') msg += "La tabla 'orders' NO existe en su Supabase.";
+          else if (errorSnake.code === '42703') msg += "Faltan columnas en la tabla.";
+          else if (errorSnake.code === '42501') msg += "Error de permisos (RLS). Active acceso para anon.";
+          
+          throw new Error(msg);
         }
       }
 
       setIsNewOrderModalOpen(false);
       setView('PENDING');
       await fetchOrders();
-      alert("✅ Pedido cargado con éxito en Logística");
+      alert("✅ Pedido confirmado con éxito");
     } catch (err: any) {
-      console.error("Error completo al guardar:", err);
+      console.error("Error completo:", err);
       alert("❌ " + err.message);
     } finally {
       setIsSaving(false);
@@ -198,8 +189,8 @@ export default function App() {
               <SidebarItem icon={<Truck size={20}/>} label="En Despacho" active={view === 'DISPATCHED'} onClick={() => { setView('DISPATCHED'); setIsSidebarOpen(false); }} />
               <div className="h-px bg-slate-100 my-4" />
               <SidebarItem icon={<PlusSquare size={20}/>} label="CARGA DE ENVÍO" onClick={() => { setIsNewOrderModalOpen(true); setIsSidebarOpen(false); }} />
-              <SidebarItem icon={<Activity size={20}/>} label="Seguimiento de Pedido" active={view === 'TRACKING'} onClick={() => { setView('TRACKING'); setIsSidebarOpen(false); }} />
-              <SidebarItem icon={<History size={20}/>} label="Historial de Archivo" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<Activity size={20}/>} label="Seguimiento" active={view === 'TRACKING'} onClick={() => { setView('TRACKING'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<History size={20}/>} label="Historial" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
             </nav>
             <div className="p-4 border-t mt-auto">
                <SidebarItem icon={<LogOut size={20}/>} label="Salir" onClick={() => setCurrentUser(null)} danger />
@@ -215,10 +206,21 @@ export default function App() {
       </header>
 
       <main className="p-5 space-y-6">
+        {dbError && (
+          <div className="bg-red-50 border-2 border-red-200 p-6 rounded-3xl flex items-start gap-4 animate-in fade-in slide-in-from-top">
+            <ServerCrash className="text-red-500 shrink-0" size={24} />
+            <div className="space-y-2">
+              <h4 className="font-black text-red-800 text-sm uppercase">Error de Conexión</h4>
+              <p className="text-[10px] text-red-600 font-bold leading-relaxed">{dbError}</p>
+              <button onClick={fetchOrders} className="bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Reintentar</button>
+            </div>
+          </div>
+        )}
+
         {(isLoading || isSaving) && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Guardando pedido...' : 'Sincronizando...'}</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Confirmando pedido...' : 'Cargando datos...'}</p>
           </div>
         )}
 
@@ -240,7 +242,7 @@ export default function App() {
               </div>
               <div className="text-left">
                 <h4 className="font-black text-white uppercase tracking-tighter text-sm">CARGA DE ENVÍO</h4>
-                <p className="text-[10px] font-bold text-slate-400">Ingreso manual de nueva orden</p>
+                <p className="text-[10px] font-bold text-slate-400">Nuevo ingreso manual</p>
               </div>
               <ChevronRight className="ml-auto text-slate-500" />
             </button>
@@ -333,7 +335,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800">Carga de Envío</h2>
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Nuevo ingreso a logística</p>
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Confirmar ingreso a logística</p>
       </div>
       <div className="space-y-4">
         <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
@@ -341,10 +343,10 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
           <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="1450" />
           <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="FIRMAT" />
         </div>
-        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre completo del comercio" />
+        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Razón Social / Comercio" />
         <div className="space-y-2">
           <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Notas / Transporte</label>
-          <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones especiales..." />
+          <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
         </div>
       </div>
       <button 
@@ -398,7 +400,7 @@ function Input({ label, value, onChange, placeholder }: any) {
 }
 
 function OrderCard({ order, onClick, allOrders }: any) {
-  const isGrouped = allOrders.filter((o:any) => o.customerNumber === order.customerNumber && o.status !== OrderStatus.ARCHIVED).length > 1;
+  const isGrouped = allOrders?.filter((o:any) => o.customerNumber === order.customerNumber && o.status !== OrderStatus.ARCHIVED).length > 1;
   return (
     <div onClick={onClick} className={`bg-white p-6 rounded-[32px] border-2 shadow-sm relative overflow-hidden cursor-pointer ${isGrouped ? 'border-teal-500/20' : 'border-slate-100'}`}>
       <div className="flex justify-between items-start mb-3">
@@ -432,12 +434,12 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
 
         <div className="space-y-4 mb-8">
           <div className="flex justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <span className="text-[10px] font-black text-slate-400 uppercase">Estado</span>
+             <span className="text-[10px] font-black text-slate-400 uppercase">Estado Actual</span>
              <span className="text-[10px] font-black text-teal-600 uppercase">{order.status}</span>
           </div>
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <span className="text-[9px] font-black text-slate-400 uppercase">Instrucciones / Notas</span>
-             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas adicionales"}</p>
+             <span className="text-[9px] font-black text-slate-400 uppercase">Notas de Logística</span>
+             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas"}</p>
           </div>
         </div>
 
@@ -445,7 +447,8 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
           <button 
             onClick={() => {
               const statuses = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
-              const nextIndex = statuses.indexOf(order.status) + 1;
+              const currentIndex = statuses.indexOf(order.status);
+              const nextIndex = currentIndex + 1;
               if (nextIndex < statuses.length) {
                 onUpdate({...order, status: statuses[nextIndex]});
                 onClose();
@@ -457,7 +460,7 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
           </button>
           
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => { if(confirm("¿Eliminar pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
+            <button onClick={() => { if(confirm("¿Eliminar este pedido definitivamente?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
             <button onClick={onClose} className="py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase">Cerrar</button>
           </div>
         </div>
@@ -469,8 +472,8 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
 function TrackingInternalView({ orders, onBack, onSelectOrder }: any) {
   const [q, setQ] = useState('');
   const results = orders.filter((o:any) => 
-    o.customerName.toLowerCase().includes(q.toLowerCase()) || 
-    o.orderNumber.includes(q)
+    (o.customerName?.toLowerCase() || '').includes(q.toLowerCase()) || 
+    (o.orderNumber || '').includes(q)
   );
   return (
     <div className="space-y-4 animate-in slide-in-from-right duration-300">
@@ -495,7 +498,7 @@ function LoginModal({ onLogin, onClientAccess }: any) {
   const [n, setN] = useState('');
   return (
     <div className="fixed inset-0 bg-slate-950 flex items-center justify-center p-8 z-[1000]">
-      <div className="bg-white w-full max-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl">
+      <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl">
         <h1 className="text-5xl font-black italic">D<span className="text-orange-500">&</span>G</h1>
         <div className="space-y-4">
           <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all" placeholder="Nombre Operador" value={n} onChange={e=>setN(e.target.value)} />
@@ -509,7 +512,7 @@ function LoginModal({ onLogin, onClientAccess }: any) {
 
 function CustomerPortal({ onBack, orders }: any) {
   const [s, setS] = useState('');
-  const r = orders.filter((o:any) => (o.customerName?.toLowerCase().includes(s.toLowerCase()) || o.customerNumber?.includes(s)) && o.status !== OrderStatus.ARCHIVED);
+  const r = orders?.filter((o:any) => (o.customerName?.toLowerCase().includes(s.toLowerCase()) || o.customerNumber?.includes(s)) && o.status !== OrderStatus.ARCHIVED) || [];
   
   return (
     <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50">
