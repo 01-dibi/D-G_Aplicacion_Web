@@ -66,7 +66,6 @@ export default function App() {
 
       setOrders(mappedData);
       
-      // Si hay un pedido seleccionado, actualizarlo con los nuevos datos
       if (selectedOrder) {
         const updated = mappedData.find(o => o.id === selectedOrder.id);
         if (updated) setSelectedOrder(updated);
@@ -141,7 +140,7 @@ export default function App() {
       await fetchOrders();
     } catch (err: any) {
       console.error("Update failed:", err);
-      alert(`❌ ERROR AL GUARDAR: ${err.message}\n\nNota: Verifica que la columna '${err.hint?.includes('carrier') ? 'carrier' : 'necesaria'}' exista en Supabase.`);
+      alert(`❌ ERROR AL GUARDAR: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
@@ -447,7 +446,6 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
     customDeposit: ''
   });
 
-  // Inicializar selectores de transporte si ya existe un carrier
   useEffect(() => {
     if (order.carrier) {
       if (order.carrier.includes('VIAJANTE:')) {
@@ -494,7 +492,7 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
     setPackaging(packaging.filter(p => p.id !== id));
   };
 
-  const saveDetails = async (preventClose = false) => {
+  const getFinalCarrier = () => {
     let finalCarrier = '';
     const catUpper = carrierCategory.toUpperCase();
     if (catUpper === 'VIAJANTES' || catUpper === 'VENDEDORES') {
@@ -502,11 +500,14 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
     } else if (carrierCategory) {
       finalCarrier = `${catUpper}: ${customCarrier.toUpperCase()}`;
     }
+    return finalCarrier;
+  };
 
+  const saveDetails = async () => {
     await onUpdate({ 
       ...order, 
       detailedPackaging: packaging, 
-      carrier: finalCarrier,
+      carrier: getFinalCarrier(),
       customerNumber,
       orderNumber: orderNumbers
     });
@@ -532,18 +533,10 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
     const nextIdx = stages.indexOf(order.status) + 1;
     
     if (nextIdx < stages.length) {
-      let finalCarrier = '';
-      const catUpper = carrierCategory.toUpperCase();
-      if (catUpper === 'VIAJANTES' || catUpper === 'VENDEDORES') {
-        finalCarrier = `${catUpper === 'VIAJANTES' ? 'VIAJANTE' : 'VENDEDOR'}: ${carrierDetail.toUpperCase()}`;
-      } else if (carrierCategory) {
-        finalCarrier = `${catUpper}: ${customCarrier.toUpperCase()}`;
-      }
-
       await onUpdate({ 
         ...order, 
         detailedPackaging: packaging, 
-        carrier: finalCarrier,
+        carrier: getFinalCarrier(),
         customerNumber,
         orderNumber: orderNumbers,
         status: stages[nextIdx]
@@ -557,7 +550,6 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
       <div className="bg-white w-full max-w-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
         <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors"><X/></button>
         
-        {/* Cabecera optimizada según requerimiento 2 */}
         <div className="mb-6 flex flex-col items-start gap-1">
           <div className="flex items-center gap-2 relative">
             <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
@@ -599,7 +591,6 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
           
           <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic pr-8 mt-2 uppercase">{order.customerName}</h2>
           
-          {/* CLIENTE Destacado y Editable (Requerimiento 1) */}
           <div className="mt-3 flex items-center gap-3 bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 shadow-inner w-full">
             <UserCircle2 size={20} className="text-slate-400" />
             <div className="flex flex-col flex-1">
@@ -618,7 +609,6 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
           </div>
         </div>
 
-        {/* Gestión de Bultos mejorada (Requerimiento 3) */}
         <div className="space-y-4 mb-8">
            <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
               <div className="flex justify-between items-center mb-5">
@@ -672,7 +662,6 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
               </div>
            </div>
 
-           {/* Sistema de Despacho Inteligente (Requerimiento 4) */}
            <div className="p-6 bg-indigo-50/40 rounded-[32px] border border-indigo-100/50 space-y-4">
               <h4 className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Sistema de Despacho</h4>
               
@@ -744,9 +733,8 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
           </button>
           
           <div className="grid grid-cols-2 gap-3 mt-4">
-            {/* Fix: Changed handleDeleteOrder to onDelete (prop) */}
             <button onClick={() => onDelete(order.id)} className="py-4 bg-red-50 text-red-500 rounded-[20px] text-[10px] font-black uppercase tracking-widest border border-red-100">Eliminar</button>
-            <button onClick={() => saveDetails(true)} disabled={isSaving} className="py-4 bg-teal-50 text-teal-600 rounded-[20px] text-[10px] font-black uppercase tracking-widest border border-teal-100 flex items-center justify-center gap-2">
+            <button onClick={saveDetails} disabled={isSaving} className="py-4 bg-teal-50 text-teal-600 rounded-[20px] text-[10px] font-black uppercase tracking-widest border border-teal-100 flex items-center justify-center gap-2">
               {isSaving ? <Loader2 className="animate-spin" size={12}/> : 'Guardar'}
             </button>
             <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-[20px] text-[9px] font-black uppercase active:bg-slate-200 transition-all col-span-2 tracking-[0.2em] mt-2">Cerrar</button>
@@ -953,7 +941,6 @@ function CustomerPortal({ onBack, orders, onWhatsApp, onSupportWhatsApp }: any) 
         )}
       </div>
 
-      {/* Botón de Soporte General al Final de la Modal (Reemplaza Centro de Ayuda) */}
       <div className="pt-16 pb-20 flex flex-col items-center gap-8 border-t border-slate-100 mt-12">
           <div className="space-y-2 text-center">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] italic">¿Necesitas asistencia directa?</p>
@@ -974,7 +961,6 @@ function CustomerPortal({ onBack, orders, onWhatsApp, onSupportWhatsApp }: any) 
   );
 }
 
-// Added missing Timeline component to visualize order status in the customer portal
 function Timeline({ currentStatus }: { currentStatus: OrderStatus }) {
   const stages = [
     { status: OrderStatus.PENDING, label: 'Pendiente', icon: <ClipboardList size={14} /> },
