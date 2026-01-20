@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
@@ -66,6 +65,12 @@ export default function App() {
       }));
 
       setOrders(mappedData);
+      
+      // Si hay un pedido seleccionado, actualizarlo con los nuevos datos
+      if (selectedOrder) {
+        const updated = mappedData.find(o => o.id === selectedOrder.id);
+        if (updated) setSelectedOrder(updated);
+      }
     } catch (error: any) {
       console.error("Fetch Error:", error);
       setDbError({ message: error.message, code: error.code });
@@ -114,26 +119,36 @@ export default function App() {
     return base.filter(o => 
       (o.customerName?.toLowerCase() || '').includes(lowSearch) || 
       (o.customerNumber || '').includes(lowSearch) ||
-      (o.locality?.toLowerCase() || '').includes(lowSearch)
+      (o.locality?.toLowerCase() || '').includes(lowSearch) ||
+      (o.orderNumber || '').includes(lowSearch)
     );
   }, [orders, view, searchTerm]);
 
   const handleUpdateOrder = async (updatedOrder: Order) => {
-    const { error } = await supabase.from('orders').update({
-      status: updatedOrder.status,
-      notes: updatedOrder.notes,
-      carrier: updatedOrder.carrier,
-      detailed_packaging: updatedOrder.detailedPackaging,
-      customer_number: updatedOrder.customerNumber,
-      order_number: updatedOrder.orderNumber
-    }).eq('id', updatedOrder.id);
-    
-    if (error) alert("Error: " + error.message);
-    setSelectedOrder(updatedOrder);
-    fetchOrders();
+    setIsSaving(true);
+    try {
+      const { error } = await supabase.from('orders').update({
+        status: updatedOrder.status,
+        notes: updatedOrder.notes,
+        carrier: updatedOrder.carrier?.toUpperCase(),
+        detailed_packaging: updatedOrder.detailedPackaging,
+        customer_number: updatedOrder.customerNumber,
+        order_number: updatedOrder.orderNumber
+      }).eq('id', updatedOrder.id);
+      
+      if (error) throw error;
+      
+      await fetchOrders();
+    } catch (err: any) {
+      console.error("Update failed:", err);
+      alert(`❌ ERROR AL GUARDAR: ${err.message}\n\nNota: Verifica que la columna '${err.hint?.includes('carrier') ? 'carrier' : 'necesaria'}' exista en Supabase.`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteOrder = async (id: string) => {
+    if (!confirm("¿Deseas eliminar este pedido definitivamente?")) return;
     const { error } = await supabase.from('orders').delete().eq('id', id);
     if (error) alert("Error: " + error.message);
     setSelectedOrder(null);
@@ -171,7 +186,7 @@ export default function App() {
   };
 
   const sendWhatsApp = (order: Order) => {
-    const msg = `📦 *D&G Logística - Informe de Pedido*%0A%0AHola *${order.customerName}*, tu pedido *#${order.orderNumber}* se encuentra en estado: *${order.status}*.%0A%0ALocalidad: ${order.locality}%0A${order.carrier ? `Transporte: ${order.carrier}` : ''}%0A%0AGracias por elegirnos.`;
+    const msg = `📦 *D&G Logística - Informe de Pedido*%0A%0AHola *${order.customerName}*, tu pedido *#${order.orderNumber}* se encuentra en estado: *${order.status}*.%0A%0ALocalidad: ${order.locality}%0A${order.carrier ? `Transporte/Entrega: ${order.carrier}` : ''}%0A%0AGracias por elegirnos.`;
     window.open(`https://wa.me/?text=${msg}`, '_blank');
   };
 
@@ -226,7 +241,7 @@ export default function App() {
       </header>
 
       <main className="p-5 space-y-6">
-        {isLoading && (
+        {isLoading && !isSaving && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
             <p className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando...</p>
@@ -269,7 +284,7 @@ export default function App() {
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
               <input 
                 type="text" 
-                placeholder="Filtrar por nombre o ciudad..." 
+                placeholder="Filtrar por nombre, ciudad o Nº..." 
                 className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none focus:border-teal-500 transition-all shadow-sm"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -281,7 +296,7 @@ export default function App() {
               )) : (
                 <div className="text-center py-20 opacity-20 flex flex-col items-center">
                    <Package size={64} className="mb-4" />
-                   <p className="text-xs font-black uppercase tracking-widest italic">Sin pedidos en esta sección</p>
+                   <p className="text-xs font-black uppercase tracking-widest italic">Sin pedidos encontrados</p>
                 </div>
               )}
             </div>
@@ -312,6 +327,7 @@ export default function App() {
           onUpdate={handleUpdateOrder}
           onDelete={handleDeleteOrder}
           onWhatsApp={() => sendWhatsApp(selectedOrder)}
+          isSaving={isSaving}
         />
       )}
 
@@ -415,7 +431,7 @@ function NewOrderForm({ onAdd, onBack, isSaving }: any) {
   );
 }
 
-function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWhatsApp }: any) {
+function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWhatsApp, isSaving }: any) {
   const [carrierCategory, setCarrierCategory] = useState('');
   const [carrierDetail, setCarrierDetail] = useState('');
   const [customCarrier, setCustomCarrier] = useState('');
@@ -431,19 +447,20 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
     customDeposit: ''
   });
 
+  // Inicializar selectores de transporte si ya existe un carrier
   useEffect(() => {
     if (order.carrier) {
-      if (order.carrier.includes('Viajante:')) {
+      if (order.carrier.includes('VIAJANTE:')) {
         setCarrierCategory('Viajantes');
-        setCarrierDetail(order.carrier.replace('Viajante: ', ''));
-      } else if (order.carrier.includes('Vendedor:')) {
+        setCarrierDetail(order.carrier.replace('VIAJANTE: ', ''));
+      } else if (order.carrier.includes('VENDEDOR:')) {
         setCarrierCategory('Vendedores');
-        setCarrierDetail(order.carrier.replace('Vendedor: ', ''));
+        setCarrierDetail(order.carrier.replace('VENDEDOR: ', ''));
       } else {
-        const cats = ['Transporte', 'Comisionista', 'Retiro Personal', 'Expreso'];
+        const cats = ['TRANSPORTE', 'COMISIONISTA', 'RETIRO PERSONAL', 'EXPRESO'];
         const found = cats.find(c => order.carrier.startsWith(`${c}:`));
         if (found) {
-          setCarrierCategory(found);
+          setCarrierCategory(found.charAt(0) + found.slice(1).toLowerCase());
           setCustomCarrier(order.carrier.replace(`${found}: `, ''));
         }
       }
@@ -477,18 +494,19 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
     setPackaging(packaging.filter(p => p.id !== id));
   };
 
-  const saveDetails = () => {
+  const saveDetails = async (preventClose = false) => {
     let finalCarrier = '';
-    if (carrierCategory === 'Viajantes' || carrierCategory === 'Vendedores') {
-      finalCarrier = `${carrierCategory === 'Viajantes' ? 'Viajante' : 'Vendedor'}: ${carrierDetail}`;
+    const catUpper = carrierCategory.toUpperCase();
+    if (catUpper === 'VIAJANTES' || catUpper === 'VENDEDORES') {
+      finalCarrier = `${catUpper === 'VIAJANTES' ? 'VIAJANTE' : 'VENDEDOR'}: ${carrierDetail.toUpperCase()}`;
     } else if (carrierCategory) {
-      finalCarrier = `${carrierCategory}: ${customCarrier}`;
+      finalCarrier = `${catUpper}: ${customCarrier.toUpperCase()}`;
     }
 
-    onUpdate({ 
+    await onUpdate({ 
       ...order, 
       detailedPackaging: packaging, 
-      carrier: finalCarrier.toUpperCase(),
+      carrier: finalCarrier,
       customerNumber,
       orderNumber: orderNumbers
     });
@@ -509,12 +527,27 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
 
   const totalBultos = packaging.reduce((acc, p) => acc + (p.quantity || 0), 0);
 
-  const advanceStage = () => {
-    saveDetails();
+  const advanceStage = async () => {
     const stages = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
     const nextIdx = stages.indexOf(order.status) + 1;
+    
     if (nextIdx < stages.length) {
-      onUpdate({ ...order, status: stages[nextIdx] });
+      let finalCarrier = '';
+      const catUpper = carrierCategory.toUpperCase();
+      if (catUpper === 'VIAJANTES' || catUpper === 'VENDEDORES') {
+        finalCarrier = `${catUpper === 'VIAJANTES' ? 'VIAJANTE' : 'VENDEDOR'}: ${carrierDetail.toUpperCase()}`;
+      } else if (carrierCategory) {
+        finalCarrier = `${catUpper}: ${customCarrier.toUpperCase()}`;
+      }
+
+      await onUpdate({ 
+        ...order, 
+        detailedPackaging: packaging, 
+        carrier: finalCarrier,
+        customerNumber,
+        orderNumber: orderNumbers,
+        status: stages[nextIdx]
+      });
       onClose();
     }
   };
@@ -524,30 +557,27 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
       <div className="bg-white w-full max-w-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
         <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors"><X/></button>
         
-        {/* Cabecera: Etiquetas a la Izquierda */}
+        {/* Cabecera optimizada según requerimiento 2 */}
         <div className="mb-6 flex flex-col items-start gap-1">
           <div className="flex items-center gap-2 relative">
-            {/* LEYENDA MANUAL (Gris) / IA (Verde) */}
             <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
               {order.source === 'IA' ? 'INTELIGENCIA ARTIFICIAL' : 'MANUAL'}
             </span>
             
-            {/* ORDEN (Verde) */}
-            <div className="flex items-center gap-1 group">
+            <div className="flex items-center gap-1">
               <span className="text-[10px] font-black text-emerald-600 uppercase tracking-tighter bg-emerald-50 px-2 py-0.5 rounded-md">
                 ORDEN {orderNumbers}
               </span>
               <button 
                 onClick={() => setShowOrderPicker(!showOrderPicker)} 
-                className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-all shadow-sm active:scale-90"
+                className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-all active:scale-90"
               >
                 <Plus size={12} strokeWidth={3}/>
               </button>
 
-              {/* Selector de Órdenes del mismo Cliente */}
               {showOrderPicker && (
                 <div className="absolute left-0 top-full mt-2 bg-white border-2 border-emerald-100 p-3 rounded-2xl shadow-xl z-50 w-56 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <h5 className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-2">Órdenes del Cliente {customerNumber}</h5>
+                  <h5 className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-2">Pedidos de este Cliente</h5>
                   <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
                     {otherOrdersSameCustomer.length > 0 ? otherOrdersSameCustomer.map((o: any) => (
                       <button 
@@ -558,15 +588,10 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
                         #{o.orderNumber} <span className="text-[8px] opacity-40">{o.status}</span>
                       </button>
                     )) : (
-                      <p className="text-[8px] italic text-slate-300 p-2">No hay otras órdenes para este cliente</p>
+                      <p className="text-[8px] italic text-slate-300 p-2 text-center">No hay otros pedidos pendientes</p>
                     )}
                   </div>
-                  <button 
-                    onClick={manualAddOrderNumber}
-                    className="w-full mt-2 py-2 text-[8px] font-black text-emerald-600 uppercase tracking-widest border-t border-slate-50 hover:bg-slate-50 transition-colors"
-                  >
-                    + Ingreso Manual
-                  </button>
+                  <button onClick={manualAddOrderNumber} className="w-full mt-2 py-2 text-[8px] font-black text-emerald-600 uppercase border-t border-slate-50 hover:bg-slate-50">+ Ingreso Manual</button>
                 </div>
               )}
             </div>
@@ -574,7 +599,7 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
           
           <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic pr-8 mt-2 uppercase">{order.customerName}</h2>
           
-          {/* CLIENTE Destacado y Editable */}
+          {/* CLIENTE Destacado y Editable (Requerimiento 1) */}
           <div className="mt-3 flex items-center gap-3 bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 shadow-inner w-full">
             <UserCircle2 size={20} className="text-slate-400" />
             <div className="flex flex-col flex-1">
@@ -584,98 +609,76 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
                 className="bg-transparent text-lg font-black text-slate-900 outline-none border-b-2 border-transparent focus:border-teal-500 transition-all w-full tracking-tighter"
                 value={customerNumber}
                 onChange={e => setCustomerNumber(e.target.value)}
-                placeholder="0000"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3 ml-2">
+          <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3 ml-1">
              <MapPin size={10} className="text-orange-500" /> {order.locality}
           </div>
         </div>
 
-        {/* Gestión de Bultos por Depósito */}
+        {/* Gestión de Bultos mejorada (Requerimiento 3) */}
         <div className="space-y-4 mb-8">
-           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100 shadow-sm">
+           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
               <div className="flex justify-between items-center mb-5">
                 <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest">Gestión de Bultos</h4>
-                <div className="flex items-center gap-2 bg-emerald-500 px-4 py-1.5 rounded-full shadow-lg shadow-emerald-200">
-                  <span className="text-[9px] font-black text-white uppercase tracking-widest">Total:</span>
-                  <span className="text-sm font-black text-white">{totalBultos}</span>
+                <div className="flex items-center gap-2 bg-emerald-500 px-3 py-1 rounded-full shadow-lg shadow-emerald-200">
+                  <span className="text-[8px] font-black text-white uppercase tracking-widest">Contador:</span>
+                  <span className="text-xs font-black text-white">{totalBultos}</span>
                 </div>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {packaging.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100 shadow-sm animate-in slide-in-from-left duration-200">
-                     <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-slate-50 rounded-2xl flex items-center justify-center font-black text-sm text-slate-400 border border-slate-100">{p.quantity}</div>
+                  <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
+                     <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-slate-50 rounded-xl flex items-center justify-center font-black text-xs text-slate-400">{p.quantity}</div>
                         <div className="flex flex-col">
-                          <span className="text-xs font-black text-slate-700 uppercase tracking-tighter">{p.type}</span>
-                          <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">DEPÓSITO {p.deposit}</span>
+                          <span className="text-xs font-black text-slate-700 uppercase">{p.type}</span>
+                          <span className="text-[8px] font-black text-emerald-600 uppercase">DEPÓSITO {p.deposit}</span>
                         </div>
                      </div>
-                     <button onClick={() => removePackage(p.id)} className="p-2 text-red-300 hover:text-red-500 transition-all active:scale-90"><Trash2 size={16}/></button>
+                     <button onClick={() => removePackage(p.id)} className="text-red-300 hover:text-red-500 transition-all"><Trash2 size={16}/></button>
                   </div>
                 ))}
                 
-                {/* Nueva Fila de Agregado con Opción 'Otro' */}
-                <div className="bg-white/70 p-5 rounded-[28px] border-2 border-dashed border-slate-200 space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Ubicación / Depósito</label>
-                      <select 
-                        className="w-full bg-white border-2 border-slate-100 rounded-xl p-3 text-[10px] font-black uppercase outline-none focus:border-emerald-500 transition-all"
-                        value={newPackage.deposit}
-                        onChange={e => setNewPackage({...newPackage, deposit: e.target.value})}
-                      >
-                        <option value="D1">D1</option>
-                        <option value="F">F</option>
-                        <option value="E">E</option>
-                        <option value="Otro">Otro...</option>
+                <div className="bg-white/70 p-4 rounded-[28px] border-2 border-dashed border-slate-200 space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest ml-1">Depósito</label>
+                      <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none" value={newPackage.deposit} onChange={e=>setNewPackage({...newPackage, deposit: e.target.value})}>
+                        <option value="D1">D1</option><option value="F">F</option><option value="E">E</option><option value="Otro">Otro...</option>
                       </select>
                       {newPackage.deposit === 'Otro' && (
-                        <input className="w-full bg-white border-2 border-orange-100 mt-1 rounded-xl p-3 text-[10px] font-bold outline-none uppercase animate-in zoom-in" placeholder="Manual..." value={newPackage.customDeposit} onChange={e=>setNewPackage({...newPackage, customDeposit: e.target.value})}/>
+                        <input className="w-full bg-white border border-orange-100 mt-1 rounded-xl p-2 text-[10px] font-bold outline-none uppercase" placeholder="Manual..." value={newPackage.customDeposit} onChange={e=>setNewPackage({...newPackage, customDeposit: e.target.value})}/>
                       )}
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo de Bulto</label>
-                      <select 
-                        className="w-full bg-white border-2 border-slate-100 rounded-xl p-3 text-[10px] font-black uppercase outline-none focus:border-emerald-500 transition-all"
-                        value={newPackage.type}
-                        onChange={e => setNewPackage({...newPackage, type: e.target.value})}
-                      >
-                        <option value="Caja">Caja</option>
-                        <option value="Pack">Pack</option>
-                        <option value="Unidad">Unidad</option>
-                        <option value="Bolsa">Bolsa</option>
-                        <option value="Otro">Otro...</option>
+                    <div className="space-y-1">
+                      <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo</label>
+                      <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none" value={newPackage.type} onChange={e=>setNewPackage({...newPackage, type: e.target.value})}>
+                        <option value="Caja">Caja</option><option value="Pack">Pack</option><option value="Bolsa">Bolsa</option><option value="Otro">Otro...</option>
                       </select>
                       {newPackage.type === 'Otro' && (
-                        <input className="w-full bg-white border-2 border-orange-100 mt-1 rounded-xl p-3 text-[10px] font-bold outline-none uppercase animate-in zoom-in" placeholder="Manual..." value={newPackage.customType} onChange={e=>setNewPackage({...newPackage, customType: e.target.value})}/>
+                        <input className="w-full bg-white border border-orange-100 mt-1 rounded-xl p-2 text-[10px] font-bold outline-none uppercase" placeholder="Manual..." value={newPackage.customType} onChange={e=>setNewPackage({...newPackage, customType: e.target.value})}/>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-3 items-end">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Cantidad</label>
-                      <input type="number" className="w-20 bg-white border-2 border-slate-100 rounded-xl p-3 text-sm font-black outline-none focus:border-emerald-500 transition-all" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
-                    </div>
-                    <button onClick={addPackage} className="flex-1 bg-emerald-600 text-white h-[48px] rounded-xl flex items-center justify-center gap-2 font-black text-[11px] uppercase tracking-widest shadow-xl shadow-emerald-200 active:scale-95 transition-all">
-                      <Plus size={18} strokeWidth={3}/> AGREGAR BULTO
-                    </button>
+                  <div className="flex gap-2">
+                    <input type="number" className="w-16 bg-white border border-slate-100 rounded-xl p-2 text-xs font-black outline-none" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
+                    <button onClick={addPackage} className="flex-1 bg-emerald-600 text-white rounded-xl flex items-center justify-center gap-2 font-black text-[10px] uppercase shadow-lg shadow-emerald-200 active:scale-95 transition-all"><Plus size={14}/> AGREGAR</button>
                   </div>
                 </div>
               </div>
            </div>
 
-           {/* Sistema de Despacho Inteligente */}
-           <div className="p-6 bg-indigo-50/40 rounded-[32px] border border-indigo-100/50 space-y-5">
+           {/* Sistema de Despacho Inteligente (Requerimiento 4) */}
+           <div className="p-6 bg-indigo-50/40 rounded-[32px] border border-indigo-100/50 space-y-4">
               <h4 className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Sistema de Despacho</h4>
               
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[8px] font-black text-indigo-300 uppercase tracking-widest ml-1">Categoría Principal</label>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Categoría</label>
                   <select 
                     className="w-full bg-white border-2 border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none focus:border-indigo-500 shadow-sm"
                     value={carrierCategory}
@@ -691,35 +694,32 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
                   </select>
                 </div>
 
-                {/* Sub-selectores Específicos */}
-                {carrierCategory === 'Viajantes' && (
-                  <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
-                    <label className="text-[8px] font-black text-indigo-400 uppercase tracking-widest ml-1">Seleccionar Viajante</label>
+                {(carrierCategory === 'Viajantes' || carrierCategory === 'Vendedores') && (
+                  <div className="space-y-1 animate-in zoom-in duration-200">
+                    <label className="text-[7px] font-black text-indigo-400 uppercase tracking-widest ml-1">Personal Asignado</label>
                     <select className="w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-md" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
-                      <option value="">Nombres...</option>
-                      <option value="Matías">Matías</option>
-                      <option value="Nicolás">Nicolás</option>
-                    </select>
-                  </div>
-                )}
-
-                {carrierCategory === 'Vendedores' && (
-                  <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
-                    <label className="text-[8px] font-black text-indigo-400 uppercase tracking-widest ml-1">Seleccionar Vendedor</label>
-                    <select className="w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-md" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
-                      <option value="">Nombres...</option>
-                      <option value="Mauro">Mauro</option>
-                      <option value="Gustavo">Gustavo</option>
+                      <option value="">Elegir nombre...</option>
+                      {carrierCategory === 'Viajantes' ? (
+                        <>
+                          <option value="Matías">Matías</option>
+                          <option value="Nicolás">Nicolás</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="Mauro">Mauro</option>
+                          <option value="Gustavo">Gustavo</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 )}
 
                 {['Transporte', 'Comisionista', 'Retiro Personal', 'Expreso'].includes(carrierCategory) && (
-                  <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
-                    <label className="text-[8px] font-black text-indigo-400 uppercase tracking-widest ml-1">Ingresar detalle de {carrierCategory}</label>
+                  <div className="space-y-1 animate-in zoom-in duration-200">
+                    <label className="text-[7px] font-black text-indigo-400 uppercase tracking-widest ml-1">Detalle Manual</label>
                     <input 
                       className="w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-bold outline-none focus:border-indigo-500 shadow-md uppercase" 
-                      placeholder="Nombre, empresa o dato manual" 
+                      placeholder="Nombre de empresa o comisionista" 
                       value={customCarrier}
                       onChange={e => setCustomCarrier(e.target.value)}
                     />
@@ -728,25 +728,28 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
               </div>
            </div>
 
-          {/* Observaciones */}
           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
-             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observaciones Logísticas</span>
+             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Instrucciones Logísticas</span>
              <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones de despacho"}</p>
           </div>
         </div>
 
         <div className="space-y-3 pt-6 border-t border-slate-50">
           <button 
+            disabled={isSaving}
             onClick={advanceStage} 
-            className="w-full bg-slate-900 text-white py-6 rounded-[32px] font-black uppercase text-xs tracking-[0.3em] shadow-2xl flex items-center justify-center gap-3 active:scale-[0.97] transition-all group"
+            className="w-full bg-slate-900 text-white py-6 rounded-[32px] font-black uppercase text-xs tracking-[0.3em] shadow-2xl flex items-center justify-center gap-3 active:scale-[0.97] transition-all group disabled:opacity-50"
           >
-            Siguiente Etapa <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform"/>
+            {isSaving ? <Loader2 className="animate-spin" size={18}/> : 'Avanzar de Etapa'} <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform"/>
           </button>
           
           <div className="grid grid-cols-2 gap-3 mt-4">
-            <button onClick={() => { if(confirm("¿Eliminar este pedido definitivamente?")) { onDelete(order.id); onClose(); } }} className="py-5 bg-red-50 text-red-500 rounded-[24px] text-[10px] font-black uppercase border border-red-100 active:bg-red-100 transition-all tracking-widest">Eliminar</button>
-            <button onClick={saveDetails} className="py-5 bg-teal-50 text-teal-600 rounded-[24px] text-[10px] font-black uppercase border border-teal-100 transition-all tracking-widest">Guardar Cambios</button>
-            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-[20px] text-[9px] font-black uppercase active:bg-slate-200 transition-all col-span-2 tracking-[0.2em] mt-2">Cerrar Detalle</button>
+            {/* Fix: Changed handleDeleteOrder to onDelete (prop) */}
+            <button onClick={() => onDelete(order.id)} className="py-4 bg-red-50 text-red-500 rounded-[20px] text-[10px] font-black uppercase tracking-widest border border-red-100">Eliminar</button>
+            <button onClick={() => saveDetails(true)} disabled={isSaving} className="py-4 bg-teal-50 text-teal-600 rounded-[20px] text-[10px] font-black uppercase tracking-widest border border-teal-100 flex items-center justify-center gap-2">
+              {isSaving ? <Loader2 className="animate-spin" size={12}/> : 'Guardar'}
+            </button>
+            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-[20px] text-[9px] font-black uppercase active:bg-slate-200 transition-all col-span-2 tracking-[0.2em] mt-2">Cerrar</button>
           </div>
 
           <button onClick={onWhatsApp} className="w-full bg-emerald-500 text-white py-5 rounded-[28px] font-black uppercase text-[11px] tracking-[0.2em] shadow-xl shadow-emerald-200/50 flex items-center justify-center gap-3 active:scale-95 transition-all mt-6 border-b-4 border-emerald-600">
