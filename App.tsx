@@ -5,7 +5,7 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings
+  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types';
 import { supabase, connectionStatus } from './supabaseClient';
@@ -20,7 +20,6 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [dbError, setDbError] = useState<{message: string, code?: string} | null>(null);
-  const [showSqlHelp, setShowSqlHelp] = useState(false);
   
   const [currentUser, setCurrentUser] = useState<{ name: string } | null>(() => {
     try {
@@ -34,6 +33,11 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
 
   const fetchOrders = async () => {
+    if (!connectionStatus.isConfigured) {
+      setIsLoading(false);
+      return;
+    }
+    
     setIsLoading(true);
     setDbError(null);
     try {
@@ -67,7 +71,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (currentUser && connectionStatus.hasKey) {
+    if (currentUser) {
       fetchOrders();
       const channels = supabase.channel('orders-realtime')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
@@ -75,6 +79,8 @@ export default function App() {
         })
         .subscribe();
       return () => { supabase.removeChannel(channels); };
+    } else {
+      setIsLoading(false);
     }
   }, [currentUser]);
 
@@ -127,10 +133,7 @@ export default function App() {
   };
 
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
-    if (connectionStatus.isPlaceholder) {
-      return alert("❌ ERROR: No se puede guardar. Falta configurar VITE_SUPABASE_ANON_KEY en Vercel.");
-    }
-
+    setDbError(null);
     setIsSaving(true);
     try {
       const payload = {
@@ -150,10 +153,11 @@ export default function App() {
       setIsNewOrderModalOpen(false);
       setView('PENDING');
       await fetchOrders();
-      alert("✅ Pedido guardado correctamente.");
+      alert("✅ PEDIDO GUARDADO EXITOSAMENTE");
     } catch (err: any) {
-      console.error("Add Order error:", err);
-      alert(`❌ ERROR AL GUARDAR: ${err.message}`);
+      console.error("Critical Save Error:", err);
+      setDbError({ message: err.message, code: err.code });
+      alert(`❌ ERROR: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
@@ -198,89 +202,32 @@ export default function App() {
         <div className="flex flex-col items-center">
           <h1 className="text-lg font-black tracking-tighter uppercase italic leading-none">D&G <span className="text-orange-500">Logistics</span></h1>
           <div className="flex items-center gap-1 mt-1">
-            {!connectionStatus.isPlaceholder ? (
-              <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest"><Wifi size={8}/> ONLINE</span>
-            ) : (
-              <span className="flex items-center gap-1 text-[7px] font-black text-red-400 uppercase tracking-widest"><WifiOff size={8}/> OFFLINE</span>
-            )}
+            <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest animate-pulse"><Wifi size={8}/> SISTEMA ONLINE</span>
           </div>
         </div>
         <div className="w-10 h-10 bg-teal-500 rounded-2xl flex items-center justify-center font-bold shadow-lg shadow-teal-500/20">{currentUser.name[0]}</div>
       </header>
 
       <main className="p-5 space-y-6">
-        {connectionStatus.isPlaceholder && (
-          <div className="bg-orange-50 border-2 border-orange-200 p-6 rounded-[32px] space-y-3">
-            <div className="flex items-center gap-3 text-orange-600">
-              <ShieldAlert size={24} />
-              <h4 className="font-black text-sm uppercase">Sin Conexión Real</h4>
-            </div>
-            <p className="text-[10px] text-orange-700 font-bold leading-relaxed">
-              La App está en modo demostración. Para guardar datos reales, configura <b>VITE_SUPABASE_ANON_KEY</b> en tu panel de Vercel.
-            </p>
-          </div>
-        )}
-
         {dbError && (
-          <div className="bg-red-50 border-2 border-red-200 p-6 rounded-[32px] space-y-4 animate-in slide-in-from-top">
-            <div className="flex items-start gap-4">
-              <ServerCrash className="text-red-500 shrink-0" size={24} />
-              <div>
-                <h4 className="font-black text-red-800 text-sm uppercase">Error de DB</h4>
-                <p className="text-[10px] text-red-600 font-bold leading-relaxed">{dbError.message}</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={fetchOrders} className="bg-red-500 text-white py-3 rounded-2xl text-[9px] font-black uppercase">Reintentar</button>
-              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2"><Terminal size={12}/> Reparar</button>
-            </div>
+          <div className="bg-red-50 border-2 border-red-200 p-6 rounded-[32px] space-y-3">
+             <div className="flex items-center gap-3 text-red-600">
+                <AlertCircle size={20}/>
+                <h4 className="font-black text-xs uppercase">Error de Conexión</h4>
+             </div>
+             <p className="text-[10px] text-red-500 font-bold">{dbError.message}</p>
+             <button onClick={fetchOrders} className="w-full bg-red-600 text-white py-2 rounded-xl text-[9px] font-black uppercase">Reintentar</button>
           </div>
         )}
 
-        {showSqlHelp && (
-          <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[1000] p-6 flex flex-col items-center justify-center space-y-6">
-            <button onClick={() => setShowSqlHelp(false)} className="absolute top-6 right-6 text-white/50"><X size={32}/></button>
-            <div className="text-center text-white space-y-2">
-              <h2 className="text-2xl font-black italic">Reparar Estructura</h2>
-              <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest leading-relaxed">Usa este código si recibes errores de columna o permisos.</p>
-            </div>
-            <div className="w-full bg-slate-800 p-5 rounded-[32px] font-mono text-[9px] text-teal-400 border-2 border-teal-500/30 overflow-x-auto shadow-2xl relative">
-              <pre>{`DROP TABLE IF EXISTS orders;
-CREATE TABLE orders (
-  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-  order_number text NOT NULL,
-  customer_number text,
-  customer_name text NOT NULL,
-  locality text DEFAULT 'GENERAL',
-  status text DEFAULT 'PENDIENTE',
-  notes text,
-  source text DEFAULT 'Manual',
-  reviewer text,
-  created_at timestamp with time zone DEFAULT now()
-);
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Acceso Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre>
-            </div>
-            <button 
-              onClick={() => {
-                navigator.clipboard.writeText(`DROP TABLE IF EXISTS orders; CREATE TABLE orders ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, order_number text NOT NULL, customer_number text, customer_name text NOT NULL, locality text DEFAULT 'GENERAL', status text DEFAULT 'PENDIENTE', notes text, source text DEFAULT 'Manual', reviewer text, created_at timestamp with time zone DEFAULT now() ); ALTER TABLE orders ENABLE ROW LEVEL SECURITY; CREATE POLICY "Acceso Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`);
-                alert("Copiado. Pégalo en SQL Editor y dale RUN.");
-              }}
-              className="w-full bg-teal-500 text-slate-900 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2"
-            >
-              <Copy size={16}/> Copiar SQL
-            </button>
-          </div>
-        )}
-
-        {(isLoading || isSaving) && (
+        {isLoading && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Cargando...</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando Base de Datos...</p>
           </div>
         )}
 
-        {!isLoading && !isSaving && view === 'DASHBOARD' && (
+        {!isLoading && view === 'DASHBOARD' && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <StatCard count={stats.pending} label="Pendientes" color="bg-orange-500" icon={<ClipboardList />} onClick={() => setView('PENDING')} />
@@ -291,21 +238,21 @@ CREATE POLICY "Acceso Publico" ON orders FOR ALL USING (true) WITH CHECK (true);
             
             <button 
               onClick={() => setIsNewOrderModalOpen(true)}
-              className="w-full bg-slate-900 text-white p-6 rounded-[32px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all"
+              className="w-full bg-slate-900 text-white p-6 rounded-[32px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all relative overflow-hidden"
             >
               <div className="w-12 h-12 bg-white/10 text-orange-500 rounded-2xl flex items-center justify-center">
                 <PlusSquare size={24} />
               </div>
               <div className="text-left">
                 <h4 className="font-black uppercase tracking-tighter text-sm">CARGA DE ENVÍO</h4>
-                <p className="text-[10px] font-bold opacity-60">Nuevo registro manual</p>
+                <p className="text-[10px] font-bold opacity-60 italic">Ingresar nuevo pedido a la nube</p>
               </div>
               <ChevronRight className="ml-auto opacity-50" />
             </button>
           </div>
         )}
 
-        {!isLoading && !isSaving && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
+        {!isLoading && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <button onClick={() => setView('DASHBOARD')} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest"><ArrowLeft size={14}/> Dashboard</button>
@@ -315,8 +262,8 @@ CREATE POLICY "Acceso Publico" ON orders FOR ALL USING (true) WITH CHECK (true);
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
               <input 
                 type="text" 
-                placeholder="Buscar cliente..." 
-                className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none"
+                placeholder="Buscar por cliente o localidad..." 
+                className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none focus:border-teal-500 transition-all shadow-sm"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -325,7 +272,10 @@ CREATE POLICY "Acceso Publico" ON orders FOR ALL USING (true) WITH CHECK (true);
               {filteredOrders.length > 0 ? filteredOrders.map(order => (
                 <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} allOrders={orders} />
               )) : (
-                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase tracking-widest">Sin registros</p>
+                <div className="text-center py-16 opacity-30 flex flex-col items-center">
+                   <Package size={48} className="mb-4" />
+                   <p className="text-xs font-black uppercase tracking-widest">Sin registros en esta etapa</p>
+                </div>
               )}
             </div>
           </div>
@@ -385,8 +335,8 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800">Carga de Envío</h2>
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Confirmación de ingreso</p>
+        <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800 leading-none">Carga de Envío</h2>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 italic">Guardado directo en la nube</p>
       </div>
       <div className="space-y-4">
         <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
@@ -394,18 +344,18 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
           <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="1450" />
           <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="FIRMAT" />
         </div>
-        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Comercio / Cliente" />
+        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre del Comercio" />
         <div className="space-y-2">
-          <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Notas / Transporte</label>
-          <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
+          <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Observaciones</label>
+          <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-24 shadow-inner" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
         </div>
       </div>
       <button 
         disabled={isSaving}
         onClick={submit} 
-        className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2"
+        className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
       >
-        {isSaving ? <Loader2 className="animate-spin" size={16}/> : 'CONFIRMAR INGRESO'}
+        {isSaving ? <Loader2 className="animate-spin" size={18}/> : 'CONFIRMAR INGRESO'}
       </button>
     </div>
   );
@@ -445,7 +395,7 @@ function Input({ label, value, onChange, placeholder }: any) {
   return (
     <div className="space-y-2">
       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">{label}</label>
-      <input className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} />
+      <input className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all shadow-inner" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} />
     </div>
   );
 }
@@ -453,11 +403,11 @@ function Input({ label, value, onChange, placeholder }: any) {
 function OrderCard({ order, onClick, allOrders }: any) {
   const isGrouped = allOrders?.filter((o:any) => o.customerNumber === order.customerNumber && o.status !== OrderStatus.ARCHIVED).length > 1;
   return (
-    <div onClick={onClick} className={`bg-white p-6 rounded-[32px] border-2 shadow-sm relative overflow-hidden cursor-pointer ${isGrouped ? 'border-teal-500/20' : 'border-slate-100'}`}>
+    <div onClick={onClick} className={`bg-white p-6 rounded-[32px] border-2 shadow-sm relative overflow-hidden cursor-pointer active:scale-98 transition-all ${isGrouped ? 'border-teal-500/20 shadow-teal-100/50' : 'border-slate-100'}`}>
       <div className="flex justify-between items-start mb-3">
         <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-400 uppercase leading-none mb-1">ORDEN</span>
-          <span className="text-[10px] font-black text-teal-600">#{order.orderNumber}</span>
+          <span className="text-[7px] font-black text-slate-400 uppercase leading-none mb-1 tracking-widest">ORDEN</span>
+          <span className="text-[10px] font-black text-teal-600 tracking-tighter">#{order.orderNumber}</span>
         </div>
         <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase ${
           order.status === OrderStatus.PENDING ? 'bg-orange-100 text-orange-600' :
@@ -465,9 +415,9 @@ function OrderCard({ order, onClick, allOrders }: any) {
           order.status === OrderStatus.DISPATCHED ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
         }`}>{order.status}</span>
       </div>
-      <h3 className="font-black text-slate-800 text-sm mb-1">{order.customerName}</h3>
-      <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400">
-        <MapPin size={10} /> {order.locality}
+      <h3 className="font-black text-slate-800 text-sm mb-1 leading-tight">{order.customerName}</h3>
+      <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+        <MapPin size={10} className="text-orange-500" /> {order.locality}
       </div>
     </div>
   );
@@ -476,21 +426,21 @@ function OrderCard({ order, onClick, allOrders }: any) {
 function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[700] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl relative animate-in zoom-in duration-200">
+      <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl relative animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
         <button onClick={onClose} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors"><X/></button>
         <div className="mb-6">
-          <h2 className="text-2xl font-black text-slate-800 leading-tight">{order.customerName}</h2>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">#{order.orderNumber} - {order.locality}</p>
+          <h2 className="text-2xl font-black text-slate-800 leading-tight italic">{order.customerName}</h2>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Nº {order.orderNumber} • {order.locality}</p>
         </div>
 
         <div className="space-y-4 mb-8">
-          <div className="flex justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <span className="text-[10px] font-black text-slate-400 uppercase">Estado</span>
-             <span className="text-[10px] font-black text-teal-600 uppercase">{order.status}</span>
+          <div className="flex justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 items-center">
+             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Etapa Actual</span>
+             <span className="text-[10px] font-black text-teal-600 uppercase bg-teal-50 px-3 py-1 rounded-full">{order.status}</span>
           </div>
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <span className="text-[9px] font-black text-slate-400 uppercase">Notas</span>
-             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas"}</p>
+             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observaciones de Depósito</span>
+             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones especiales"}</p>
           </div>
         </div>
 
@@ -505,13 +455,13 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
                 onClose();
               }
             }}
-            className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2"
+            className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
           >
-            Siguiente Paso <ChevronRight size={16}/>
+            Avanzar Etapa <ChevronRight size={16}/>
           </button>
           
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => { if(confirm("¿Eliminar?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
+            <button onClick={() => { if(confirm("¿Eliminar este pedido definitivamente?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
             <button onClick={onClose} className="py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase">Cerrar</button>
           </div>
         </div>
@@ -522,44 +472,28 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
 
 function LoginModal({ onLogin, onClientAccess }: any) {
   const [n, setN] = useState('');
-  const [showDebug, setShowDebug] = useState(false);
 
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 z-[1000]">
-      <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl overflow-hidden relative">
-        <h1 className="text-5xl font-black italic">D<span className="text-orange-500">&</span>G</h1>
+      <div className="bg-white w-full max-w-sm rounded-[48px] p-12 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-500 to-teal-500"></div>
+        <h1 className="text-6xl font-black italic tracking-tighter leading-none mb-4">D<span className="text-orange-500">&</span>G</h1>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Logistics Intelligence</p>
         
-        <div className="space-y-4">
-          <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all" placeholder="Nombre Operador" value={n} onChange={e=>setN(e.target.value)} />
-          <button onClick={()=>onLogin({name:n||'OPERADOR'})} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase shadow-xl tracking-widest text-xs">Entrar al Sistema</button>
+        <div className="space-y-4 pt-4">
+          <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all shadow-inner uppercase text-sm" placeholder="Operador" value={n} onChange={e=>setN(e.target.value)} />
+          <button onClick={()=>onLogin({name:n||'OPERADOR'})} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase shadow-xl tracking-widest text-xs active:scale-95 transition-all">Iniciar Sesión</button>
         </div>
         
-        <div className="flex flex-col gap-2">
-           <button onClick={onClientAccess} className="text-[10px] font-black text-teal-600 uppercase w-full tracking-widest hover:underline">Acceso Clientes</button>
-           <button onClick={() => setShowDebug(!showDebug)} className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center justify-center gap-1 mt-4"><Settings size={10}/> Estado Conexión</button>
+        <div className="flex flex-col gap-3 pt-6 border-t border-slate-100">
+           <button onClick={onClientAccess} className="text-[10px] font-black text-teal-600 uppercase w-full tracking-widest hover:underline flex items-center justify-center gap-2"><Search size={14}/> Seguimiento Clientes</button>
+           <div className="flex items-center justify-center gap-2 mt-2">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Nube Conectada</span>
+           </div>
         </div>
-
-        {showDebug && (
-          <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left space-y-2 animate-in slide-in-from-bottom">
-            <h5 className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Diagnóstico Vercel/Supabase</h5>
-            <div className="flex justify-between items-center text-[9px] font-bold">
-               <span className="text-slate-400">URL:</span>
-               <span className={connectionStatus.hasUrl ? 'text-emerald-500' : 'text-red-500'}>{connectionStatus.hasUrl ? 'Válida' : 'Falta'}</span>
-            </div>
-            <div className="flex justify-between items-center text-[9px] font-bold">
-               <span className="text-slate-400">Clave Secreta:</span>
-               <span className={connectionStatus.hasKey ? 'text-emerald-500' : 'text-red-500'}>{connectionStatus.hasKey ? 'Detectada' : 'No Detectada'}</span>
-            </div>
-            <div className="flex justify-between items-center text-[9px] font-bold border-t pt-2">
-               <span className="text-slate-400">Proyecto ID:</span>
-               <span className="text-slate-600">{connectionStatus.projectId}</span>
-            </div>
-            {!connectionStatus.hasKey && (
-              <p className="text-[8px] text-red-500 font-black uppercase italic leading-tight mt-2">Agrega VITE_SUPABASE_ANON_KEY en Vercel Settings.</p>
-            )}
-          </div>
-        )}
       </div>
+      <p className="mt-8 text-[8px] font-black text-white/20 uppercase tracking-[0.5em] italic">Firmat, Santa Fe • v2.6</p>
     </div>
   );
 }
@@ -569,25 +503,38 @@ function CustomerPortal({ onBack, orders }: any) {
   const r = orders?.filter((o:any) => (o.customerName?.toLowerCase().includes(s.toLowerCase()) || o.customerNumber?.includes(s)) && o.status !== OrderStatus.ARCHIVED) || [];
   
   return (
-    <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50">
+    <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col">
       <header className="flex items-center gap-4">
-        <button onClick={onBack} className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm"><ArrowLeft/></button>
-        <h2 className="text-2xl font-black italic">Seguimiento</h2>
+        <button onClick={onBack} className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm text-slate-400 active:scale-90 transition-all"><ArrowLeft/></button>
+        <h2 className="text-2xl font-black italic tracking-tighter">Estado de Envíos</h2>
       </header>
-      <div className="bg-white p-6 rounded-[32px] border-2 border-slate-100 space-y-4 shadow-sm">
-        <h3 className="font-black text-lg">Consulta tu pedido</h3>
-        <input className="w-full bg-slate-50 p-5 rounded-2xl border-2 border-transparent focus:border-teal-500 outline-none font-bold" placeholder="Tu nombre o Nº de cliente..." value={s} onChange={e=>setS(e.target.value)} />
+      
+      <div className="bg-white p-8 rounded-[40px] border-2 border-slate-100 space-y-4 shadow-xl shadow-slate-200/50">
+        <h3 className="font-black text-xl italic leading-none">Mi Pedido</h3>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Ingresa tu nombre para ver el estado en tiempo real desde el depósito.</p>
+        <input 
+          className="w-full bg-slate-50 p-6 rounded-[24px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-sm uppercase tracking-tighter shadow-inner transition-all" 
+          placeholder="Ej: Bazar Firmat..." 
+          value={s} 
+          onChange={e=>setS(e.target.value)} 
+        />
       </div>
-      <div className="space-y-4">
+
+      <div className="space-y-4 flex-1">
         {s.length > 2 && r.map((o:any) => (
-          <div key={o.id} className="bg-white p-8 rounded-[40px] shadow-lg border-2 border-slate-50 animate-in fade-in slide-in-from-bottom duration-300">
-            <h4 className="font-black text-xl mb-2 text-slate-800 uppercase italic tracking-tighter">{o.customerName}</h4>
+          <div key={o.id} className="bg-white p-8 rounded-[40px] shadow-lg border-2 border-slate-50 relative overflow-hidden animate-in slide-in-from-bottom duration-300">
+            <div className="absolute top-0 right-0 p-4 opacity-10"><Package size={60} /></div>
+            <h4 className="font-black text-2xl mb-2 text-slate-800 uppercase italic tracking-tighter leading-none">{o.customerName}</h4>
             <div className="flex flex-col mb-4">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Estado</span>
-              <span className={`text-sm font-black uppercase mt-1 ${
-                o.status === OrderStatus.PENDING ? 'text-orange-600' :
-                o.status === OrderStatus.COMPLETED ? 'text-emerald-600' : 'text-indigo-600'
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Estado de Logística</span>
+              <span className={`text-xl font-black uppercase italic tracking-tighter ${
+                o.status === OrderStatus.PENDING ? 'text-orange-500' :
+                o.status === OrderStatus.COMPLETED ? 'text-emerald-500' : 'text-indigo-600'
               }`}>{o.status}</span>
+            </div>
+            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3">
+               <Truck size={16} className="text-teal-500" />
+               <p className="text-[10px] font-bold text-slate-500 italic uppercase">El transportista te notificará al salir.</p>
             </div>
           </div>
         ))}
