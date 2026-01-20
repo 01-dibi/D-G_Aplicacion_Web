@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
@@ -306,6 +307,7 @@ export default function App() {
       {selectedOrder && (
         <OrderDetailsModal 
           order={selectedOrder} 
+          allOrders={orders}
           onClose={() => setSelectedOrder(null)} 
           onUpdate={handleUpdateOrder}
           onDelete={handleDeleteOrder}
@@ -319,56 +321,6 @@ export default function App() {
         <NavBtn icon={<ClipboardList />} active={view === 'PENDING'} onClick={() => setView('PENDING')} />
         <NavBtn icon={<Truck />} active={view === 'DISPATCHED'} onClick={() => setView('DISPATCHED')} />
       </nav>
-    </div>
-  );
-}
-
-function Timeline({ currentStatus }: { currentStatus: OrderStatus }) {
-  const stages = [
-    { id: OrderStatus.PENDING, label: 'INGRESADO' },
-    { id: OrderStatus.COMPLETED, label: 'PREPARADO' },
-    { id: OrderStatus.DISPATCHED, label: 'DESPACHADO' },
-    { id: OrderStatus.ARCHIVED, label: 'HISTÓRICO' }
-  ];
-
-  const currentIndex = stages.findIndex(s => s.id === currentStatus);
-
-  return (
-    <div className="flex flex-col gap-0 relative ml-2 py-4">
-      {stages.map((stage, index) => {
-        const isCompleted = index < currentIndex;
-        const isCurrent = index === currentIndex;
-        const isFuture = index > currentIndex;
-
-        return (
-          <div key={stage.id} className="flex gap-4 items-start relative pb-6 last:pb-0">
-            {/* Connector Line */}
-            {index < stages.length - 1 && (
-              <div className={`absolute left-[11px] top-6 w-[2px] h-[calc(100%-12px)] ${isCompleted ? 'bg-emerald-500' : 'bg-slate-200'}`} />
-            )}
-            
-            {/* Dot */}
-            <div className={`z-10 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-500 ${
-              isCompleted ? 'bg-emerald-500 shadow-lg shadow-emerald-200' :
-              isCurrent ? 'bg-white border-4 border-teal-500 ring-4 ring-teal-500/20' :
-              'bg-slate-100 border-2 border-slate-200'
-            }`}>
-              {isCompleted ? <Check size={12} className="text-white" /> : 
-               isCurrent ? <div className="w-1.5 h-1.5 bg-teal-500 rounded-full animate-pulse" /> : null}
-            </div>
-
-            {/* Label */}
-            <div className={`pt-0.5 flex flex-col ${isCurrent ? 'scale-105 origin-left transition-transform' : ''}`}>
-              <span className={`text-[11px] font-black tracking-widest ${
-                isCompleted ? 'text-emerald-600 opacity-60' :
-                isCurrent ? 'text-slate-900' :
-                'text-slate-300'
-              }`}>{stage.label}</span>
-              {isCurrent && <span className="text-[8px] font-bold text-teal-500 uppercase tracking-widest mt-0.5">Etapa Actual</span>}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -463,14 +415,14 @@ function NewOrderForm({ onAdd, onBack, isSaving }: any) {
   );
 }
 
-function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: any) {
-  // Local States for Hierarchical Selection and Extra Order Numbers
+function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWhatsApp }: any) {
   const [carrierCategory, setCarrierCategory] = useState('');
   const [carrierDetail, setCarrierDetail] = useState('');
   const [customCarrier, setCustomCarrier] = useState('');
   const [customerNumber, setCustomerNumber] = useState(order.customerNumber || '');
   const [orderNumbers, setOrderNumbers] = useState(order.orderNumber || '');
   const [packaging, setPackaging] = useState<PackagingEntry[]>(order.detailedPackaging || []);
+  const [showOrderPicker, setShowOrderPicker] = useState(false);
   const [newPackage, setNewPackage] = useState({ 
     type: 'Caja', 
     quantity: 1, 
@@ -479,7 +431,6 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
     customDeposit: ''
   });
 
-  // Load existing carrier if possible
   useEffect(() => {
     if (order.carrier) {
       if (order.carrier.includes('Viajante:')) {
@@ -499,6 +450,14 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
     }
   }, [order.carrier]);
 
+  const otherOrdersSameCustomer = useMemo(() => {
+    return (allOrders || []).filter((o: any) => 
+      o.customerNumber === customerNumber && 
+      o.id !== order.id && 
+      !orderNumbers.includes(o.orderNumber)
+    );
+  }, [allOrders, customerNumber, order.id, orderNumbers]);
+
   const addPackage = () => {
     const finalType = newPackage.type === 'Otro' ? newPackage.customType : newPackage.type;
     const finalDeposit = newPackage.deposit === 'Otro' ? newPackage.customDeposit : newPackage.deposit;
@@ -506,9 +465,9 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
 
     const entry = { 
       id: Date.now().toString(), 
-      type: finalType, 
+      type: finalType.toUpperCase(), 
       quantity: newPackage.quantity, 
-      deposit: finalDeposit 
+      deposit: finalDeposit.toUpperCase() 
     };
     setPackaging([...packaging, entry]);
     setNewPackage({ ...newPackage, customType: '', customDeposit: '' });
@@ -529,17 +488,23 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
     onUpdate({ 
       ...order, 
       detailedPackaging: packaging, 
-      carrier: finalCarrier,
+      carrier: finalCarrier.toUpperCase(),
       customerNumber,
       orderNumber: orderNumbers
     });
   };
 
-  const addOrderNumber = () => {
-    const next = prompt("Ingrese nuevo número de orden:");
+  const selectOtherOrder = (num: string) => {
+    setOrderNumbers(prev => prev ? `${prev}, ${num}` : num);
+    setShowOrderPicker(false);
+  };
+
+  const manualAddOrderNumber = () => {
+    const next = prompt("Ingrese nuevo número de orden manualmente:");
     if (next) {
-      setOrderNumbers(orderNumbers ? `${orderNumbers}, ${next}` : next);
+      setOrderNumbers(prev => prev ? `${prev}, ${next.toUpperCase()}` : next.toUpperCase());
     }
+    setShowOrderPicker(false);
   };
 
   const totalBultos = packaging.reduce((acc, p) => acc + (p.quantity || 0), 0);
@@ -559,68 +524,108 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
       <div className="bg-white w-full max-w-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
         <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors"><X/></button>
         
-        {/* Header con Etiquetas a la Izquierda */}
+        {/* Cabecera: Etiquetas a la Izquierda */}
         <div className="mb-6 flex flex-col items-start gap-1">
-          <div className="flex items-center gap-2">
-            <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{order.source}</span>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] font-black text-teal-600 uppercase tracking-tighter">ORDEN {orderNumbers}</span>
-              <button onClick={addOrderNumber} className="p-1 bg-teal-50 text-teal-600 rounded-lg hover:bg-teal-100 transition-colors"><Plus size={10}/></button>
+          <div className="flex items-center gap-2 relative">
+            {/* LEYENDA MANUAL (Gris) / IA (Verde) */}
+            <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+              {order.source === 'IA' ? 'INTELIGENCIA ARTIFICIAL' : 'MANUAL'}
+            </span>
+            
+            {/* ORDEN (Verde) */}
+            <div className="flex items-center gap-1 group">
+              <span className="text-[10px] font-black text-emerald-600 uppercase tracking-tighter bg-emerald-50 px-2 py-0.5 rounded-md">
+                ORDEN {orderNumbers}
+              </span>
+              <button 
+                onClick={() => setShowOrderPicker(!showOrderPicker)} 
+                className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-all shadow-sm active:scale-90"
+              >
+                <Plus size={12} strokeWidth={3}/>
+              </button>
+
+              {/* Selector de Órdenes del mismo Cliente */}
+              {showOrderPicker && (
+                <div className="absolute left-0 top-full mt-2 bg-white border-2 border-emerald-100 p-3 rounded-2xl shadow-xl z-50 w-56 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <h5 className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-2">Órdenes del Cliente {customerNumber}</h5>
+                  <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
+                    {otherOrdersSameCustomer.length > 0 ? otherOrdersSameCustomer.map((o: any) => (
+                      <button 
+                        key={o.id}
+                        onClick={() => selectOtherOrder(o.orderNumber)}
+                        className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-emerald-50 rounded-xl transition-colors flex justify-between items-center"
+                      >
+                        #{o.orderNumber} <span className="text-[8px] opacity-40">{o.status}</span>
+                      </button>
+                    )) : (
+                      <p className="text-[8px] italic text-slate-300 p-2">No hay otras órdenes para este cliente</p>
+                    )}
+                  </div>
+                  <button 
+                    onClick={manualAddOrderNumber}
+                    className="w-full mt-2 py-2 text-[8px] font-black text-emerald-600 uppercase tracking-widest border-t border-slate-50 hover:bg-slate-50 transition-colors"
+                  >
+                    + Ingreso Manual
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           
           <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic pr-8 mt-2 uppercase">{order.customerName}</h2>
           
-          <div className="mt-2 flex items-center gap-2">
-            <UserCircle2 size={14} className="text-slate-400" />
-            <div className="flex items-center gap-1">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">CLIENTE</span>
+          {/* CLIENTE Destacado y Editable */}
+          <div className="mt-3 flex items-center gap-3 bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 shadow-inner w-full">
+            <UserCircle2 size={20} className="text-slate-400" />
+            <div className="flex flex-col flex-1">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] mb-0.5">N° DE CLIENTE</span>
               <input 
                 type="text" 
-                className="bg-slate-50 px-2 py-0.5 rounded text-[11px] font-black text-slate-900 outline-none border-b-2 border-transparent focus:border-teal-500 transition-all w-24"
+                className="bg-transparent text-lg font-black text-slate-900 outline-none border-b-2 border-transparent focus:border-teal-500 transition-all w-full tracking-tighter"
                 value={customerNumber}
                 onChange={e => setCustomerNumber(e.target.value)}
+                placeholder="0000"
               />
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3">
+          <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3 ml-2">
              <MapPin size={10} className="text-orange-500" /> {order.locality}
           </div>
         </div>
 
-        {/* Gestión de Bultos */}
+        {/* Gestión de Bultos por Depósito */}
         <div className="space-y-4 mb-8">
-           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
-              <div className="flex justify-between items-center mb-4">
-                <h4 className="text-[9px] font-black text-slate-800 uppercase tracking-widest">Gestión de Bultos por Depósito</h4>
-                <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
-                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Total:</span>
-                  <span className="text-xs font-black text-teal-600">{totalBultos}</span>
+           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100 shadow-sm">
+              <div className="flex justify-between items-center mb-5">
+                <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest">Gestión de Bultos</h4>
+                <div className="flex items-center gap-2 bg-emerald-500 px-4 py-1.5 rounded-full shadow-lg shadow-emerald-200">
+                  <span className="text-[9px] font-black text-white uppercase tracking-widest">Total:</span>
+                  <span className="text-sm font-black text-white">{totalBultos}</span>
                 </div>
               </div>
 
               <div className="space-y-3">
                 {packaging.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-100 shadow-sm animate-in slide-in-from-left duration-200">
-                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-slate-50 rounded-xl flex items-center justify-center font-black text-xs text-slate-400">{p.quantity}</div>
+                  <div key={p.id} className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100 shadow-sm animate-in slide-in-from-left duration-200">
+                     <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-slate-50 rounded-2xl flex items-center justify-center font-black text-sm text-slate-400 border border-slate-100">{p.quantity}</div>
                         <div className="flex flex-col">
-                          <span className="text-xs font-bold text-slate-700 uppercase">{p.type}</span>
-                          <span className="text-[8px] font-black text-teal-500 uppercase tracking-widest">{p.deposit}</span>
+                          <span className="text-xs font-black text-slate-700 uppercase tracking-tighter">{p.type}</span>
+                          <span className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">DEPÓSITO {p.deposit}</span>
                         </div>
                      </div>
-                     <button onClick={() => removePackage(p.id)} className="text-red-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
+                     <button onClick={() => removePackage(p.id)} className="p-2 text-red-300 hover:text-red-500 transition-all active:scale-90"><Trash2 size={16}/></button>
                   </div>
                 ))}
                 
-                {/* Selector de nuevo bulto */}
-                <div className="bg-white/50 p-4 rounded-3xl border border-dashed border-slate-300 space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest ml-1">Depósito</label>
+                {/* Nueva Fila de Agregado con Opción 'Otro' */}
+                <div className="bg-white/70 p-5 rounded-[28px] border-2 border-dashed border-slate-200 space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Ubicación / Depósito</label>
                       <select 
-                        className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none shadow-sm"
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl p-3 text-[10px] font-black uppercase outline-none focus:border-emerald-500 transition-all"
                         value={newPackage.deposit}
                         onChange={e => setNewPackage({...newPackage, deposit: e.target.value})}
                       >
@@ -630,13 +635,13 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
                         <option value="Otro">Otro...</option>
                       </select>
                       {newPackage.deposit === 'Otro' && (
-                        <input className="w-full bg-white border mt-1 rounded-xl p-2 text-[10px] font-bold outline-none uppercase" placeholder="Especifique..." value={newPackage.customDeposit} onChange={e=>setNewPackage({...newPackage, customDeposit: e.target.value})}/>
+                        <input className="w-full bg-white border-2 border-orange-100 mt-1 rounded-xl p-3 text-[10px] font-bold outline-none uppercase animate-in zoom-in" placeholder="Manual..." value={newPackage.customDeposit} onChange={e=>setNewPackage({...newPackage, customDeposit: e.target.value})}/>
                       )}
                     </div>
-                    <div className="space-y-1">
-                      <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo de Bulto</label>
+                    <div className="space-y-2">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo de Bulto</label>
                       <select 
-                        className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none shadow-sm"
+                        className="w-full bg-white border-2 border-slate-100 rounded-xl p-3 text-[10px] font-black uppercase outline-none focus:border-emerald-500 transition-all"
                         value={newPackage.type}
                         onChange={e => setNewPackage({...newPackage, type: e.target.value})}
                       >
@@ -647,31 +652,36 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
                         <option value="Otro">Otro...</option>
                       </select>
                       {newPackage.type === 'Otro' && (
-                        <input className="w-full bg-white border mt-1 rounded-xl p-2 text-[10px] font-bold outline-none uppercase" placeholder="Especifique..." value={newPackage.customType} onChange={e=>setNewPackage({...newPackage, customType: e.target.value})}/>
+                        <input className="w-full bg-white border-2 border-orange-100 mt-1 rounded-xl p-3 text-[10px] font-bold outline-none uppercase animate-in zoom-in" placeholder="Manual..." value={newPackage.customType} onChange={e=>setNewPackage({...newPackage, customType: e.target.value})}/>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <input type="number" className="w-16 bg-white border border-slate-100 rounded-xl p-2 text-xs font-black outline-none shadow-sm" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
-                    <button onClick={addPackage} className="flex-1 bg-teal-500 text-white rounded-xl flex items-center justify-center gap-2 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-teal-200 active:scale-95 transition-all"><Plus size={16}/> AGREGAR</button>
+                  <div className="flex gap-3 items-end">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">Cantidad</label>
+                      <input type="number" className="w-20 bg-white border-2 border-slate-100 rounded-xl p-3 text-sm font-black outline-none focus:border-emerald-500 transition-all" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
+                    </div>
+                    <button onClick={addPackage} className="flex-1 bg-emerald-600 text-white h-[48px] rounded-xl flex items-center justify-center gap-2 font-black text-[11px] uppercase tracking-widest shadow-xl shadow-emerald-200 active:scale-95 transition-all">
+                      <Plus size={18} strokeWidth={3}/> AGREGAR BULTO
+                    </button>
                   </div>
                 </div>
               </div>
            </div>
 
            {/* Sistema de Despacho Inteligente */}
-           <div className="p-6 bg-indigo-50/40 rounded-[32px] border border-indigo-100/50 space-y-4">
-              <h4 className="text-[9px] font-black text-indigo-900 uppercase tracking-widest">Sistema de Despacho</h4>
+           <div className="p-6 bg-indigo-50/40 rounded-[32px] border border-indigo-100/50 space-y-5">
+              <h4 className="text-[10px] font-black text-indigo-900 uppercase tracking-widest">Sistema de Despacho</h4>
               
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Categoría</label>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[8px] font-black text-indigo-300 uppercase tracking-widest ml-1">Categoría Principal</label>
                   <select 
-                    className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none focus:border-indigo-500 shadow-sm"
+                    className="w-full bg-white border-2 border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none focus:border-indigo-500 shadow-sm"
                     value={carrierCategory}
                     onChange={e => { setCarrierCategory(e.target.value); setCarrierDetail(''); setCustomCarrier(''); }}
                   >
-                    <option value="">Seleccione Categoría...</option>
+                    <option value="">Seleccione...</option>
                     <option value="Viajantes">Viajantes</option>
                     <option value="Vendedores">Vendedores</option>
                     <option value="Transporte">Transporte</option>
@@ -681,12 +691,12 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
                   </select>
                 </div>
 
-                {/* Sub-selectors */}
+                {/* Sub-selectores Específicos */}
                 {carrierCategory === 'Viajantes' && (
-                  <div className="space-y-1 animate-in zoom-in duration-200">
-                    <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Viajante Específico</label>
-                    <select className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-sm" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
-                      <option value="">Seleccione...</option>
+                  <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
+                    <label className="text-[8px] font-black text-indigo-400 uppercase tracking-widest ml-1">Seleccionar Viajante</label>
+                    <select className="w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-md" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
+                      <option value="">Nombres...</option>
                       <option value="Matías">Matías</option>
                       <option value="Nicolás">Nicolás</option>
                     </select>
@@ -694,10 +704,10 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
                 )}
 
                 {carrierCategory === 'Vendedores' && (
-                  <div className="space-y-1 animate-in zoom-in duration-200">
-                    <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Vendedor Específico</label>
-                    <select className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-sm" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
-                      <option value="">Seleccione...</option>
+                  <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
+                    <label className="text-[8px] font-black text-indigo-400 uppercase tracking-widest ml-1">Seleccionar Vendedor</label>
+                    <select className="w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-md" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
+                      <option value="">Nombres...</option>
                       <option value="Mauro">Mauro</option>
                       <option value="Gustavo">Gustavo</option>
                     </select>
@@ -705,11 +715,11 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
                 )}
 
                 {['Transporte', 'Comisionista', 'Retiro Personal', 'Expreso'].includes(carrierCategory) && (
-                  <div className="space-y-1 animate-in zoom-in duration-200">
-                    <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Detalle de {carrierCategory}</label>
+                  <div className="space-y-2 animate-in slide-in-from-top-2 duration-300">
+                    <label className="text-[8px] font-black text-indigo-400 uppercase tracking-widest ml-1">Ingresar detalle de {carrierCategory}</label>
                     <input 
-                      className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-bold outline-none focus:border-indigo-500 shadow-sm uppercase" 
-                      placeholder="Nombre / Empresa / Detalle" 
+                      className="w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-bold outline-none focus:border-indigo-500 shadow-md uppercase" 
+                      placeholder="Nombre, empresa o dato manual" 
                       value={customCarrier}
                       onChange={e => setCustomCarrier(e.target.value)}
                     />
@@ -718,29 +728,29 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
               </div>
            </div>
 
-          {/* Observaciones Logísticas */}
+          {/* Observaciones */}
           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observaciones Logísticas</span>
-             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones específicas de despacho"}</p>
+             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones de despacho"}</p>
           </div>
         </div>
 
-        <div className="space-y-3 pt-4">
+        <div className="space-y-3 pt-6 border-t border-slate-50">
           <button 
             onClick={advanceStage} 
-            className="w-full bg-slate-900 text-white py-5 rounded-[28px] font-black uppercase text-xs tracking-[0.2em] shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
+            className="w-full bg-slate-900 text-white py-6 rounded-[32px] font-black uppercase text-xs tracking-[0.3em] shadow-2xl flex items-center justify-center gap-3 active:scale-[0.97] transition-all group"
           >
-            Avanzar Etapa <ChevronRight size={18}/>
+            Siguiente Etapa <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform"/>
           </button>
           
-          <div className="grid grid-cols-2 gap-3 mt-2">
-            <button onClick={() => { if(confirm("¿Eliminar pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[9px] font-black uppercase border border-red-100 active:bg-red-100 transition-all">Eliminar</button>
-            <button onClick={saveDetails} className="py-4 bg-teal-50 text-teal-600 rounded-2xl text-[9px] font-black uppercase border border-teal-100 transition-all">Guardar Cambios</button>
-            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-2xl text-[9px] font-black uppercase active:bg-slate-200 transition-all col-span-2">Cerrar</button>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <button onClick={() => { if(confirm("¿Eliminar este pedido definitivamente?")) { onDelete(order.id); onClose(); } }} className="py-5 bg-red-50 text-red-500 rounded-[24px] text-[10px] font-black uppercase border border-red-100 active:bg-red-100 transition-all tracking-widest">Eliminar</button>
+            <button onClick={saveDetails} className="py-5 bg-teal-50 text-teal-600 rounded-[24px] text-[10px] font-black uppercase border border-teal-100 transition-all tracking-widest">Guardar Cambios</button>
+            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-[20px] text-[9px] font-black uppercase active:bg-slate-200 transition-all col-span-2 tracking-[0.2em] mt-2">Cerrar Detalle</button>
           </div>
 
-          <button onClick={onWhatsApp} className="w-full bg-emerald-500 text-white py-4 rounded-[24px] font-black uppercase text-[10px] tracking-[0.2em] shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 active:scale-95 transition-all mt-4 border border-emerald-400">
-            <MessageCircle size={18}/> Notificar vía WhatsApp
+          <button onClick={onWhatsApp} className="w-full bg-emerald-500 text-white py-5 rounded-[28px] font-black uppercase text-[11px] tracking-[0.2em] shadow-xl shadow-emerald-200/50 flex items-center justify-center gap-3 active:scale-95 transition-all mt-6 border-b-4 border-emerald-600">
+            <MessageCircle size={20} strokeWidth={2.5}/> Notificar Pedido
           </button>
         </div>
       </div>
@@ -957,6 +967,47 @@ function CustomerPortal({ onBack, orders, onWhatsApp, onSupportWhatsApp }: any) 
             <p className="text-[9px] font-black uppercase tracking-[0.6em]">Logistics Intelligence</p>
           </div>
       </div>
+    </div>
+  );
+}
+
+// Added missing Timeline component to visualize order status in the customer portal
+function Timeline({ currentStatus }: { currentStatus: OrderStatus }) {
+  const stages = [
+    { status: OrderStatus.PENDING, label: 'Pendiente', icon: <ClipboardList size={14} /> },
+    { status: OrderStatus.COMPLETED, label: 'Preparado', icon: <CheckCircle2 size={14} /> },
+    { status: OrderStatus.DISPATCHED, label: 'Despachado', icon: <Truck size={14} /> },
+    { status: OrderStatus.ARCHIVED, label: 'Finalizado', icon: <Package size={14} /> },
+  ];
+
+  const currentIndex = stages.findIndex(s => s.status === currentStatus);
+
+  return (
+    <div className="relative flex justify-between items-start pt-2">
+      <div className="absolute top-[18px] left-0 right-0 h-0.5 bg-slate-100 -z-10 mx-4"></div>
+      {stages.map((stage, idx) => {
+        const isCompleted = idx <= currentIndex;
+        const isCurrent = idx === currentIndex;
+        
+        return (
+          <div key={stage.status} className="flex flex-col items-center gap-2 flex-1">
+            <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-500 border-4 ${
+              isCurrent ? 'bg-orange-500 text-white border-orange-100 scale-110 shadow-lg' :
+              isCompleted ? 'bg-emerald-500 text-white border-emerald-50 shadow-md' :
+              'bg-white text-slate-300 border-slate-50'
+            }`}>
+              {isCompleted && !isCurrent ? <Check size={16} /> : stage.icon}
+            </div>
+            <span className={`text-[8px] font-black uppercase tracking-tighter text-center ${
+              isCurrent ? 'text-orange-600' :
+              isCompleted ? 'text-emerald-600' :
+              'text-slate-300'
+            }`}>
+              {stage.label}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
