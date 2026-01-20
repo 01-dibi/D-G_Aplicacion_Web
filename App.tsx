@@ -5,7 +5,7 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send
+  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send, UserCircle2
 } from 'lucide-react';
 import { Order, OrderStatus, View, PackagingEntry } from './types';
 import { supabase, connectionStatus } from './supabaseClient';
@@ -122,7 +122,9 @@ export default function App() {
       status: updatedOrder.status,
       notes: updatedOrder.notes,
       carrier: updatedOrder.carrier,
-      detailed_packaging: updatedOrder.detailedPackaging
+      detailed_packaging: updatedOrder.detailedPackaging,
+      customer_number: updatedOrder.customerNumber,
+      order_number: updatedOrder.orderNumber
     }).eq('id', updatedOrder.id);
     
     if (error) alert("Error: " + error.message);
@@ -172,7 +174,12 @@ export default function App() {
     window.open(`https://wa.me/?text=${msg}`, '_blank');
   };
 
-  if (isCustomerMode) return <CustomerPortal onBack={() => setIsCustomerMode(false)} orders={orders} />;
+  const sendGeneralSupportWhatsApp = () => {
+    const msg = `Hola, necesito ayuda con una consulta de pedido en D&G Logística.`;
+    window.open(`https://wa.me/?text=${msg}`, '_blank');
+  };
+
+  if (isCustomerMode) return <CustomerPortal onBack={() => setIsCustomerMode(false)} orders={orders} onWhatsApp={sendWhatsApp} onSupportWhatsApp={sendGeneralSupportWhatsApp} />;
   if (!currentUser) return <LoginModal onLogin={u => setCurrentUser(u)} onClientAccess={() => setIsCustomerMode(true)} />;
 
   return (
@@ -316,6 +323,56 @@ export default function App() {
   );
 }
 
+function Timeline({ currentStatus }: { currentStatus: OrderStatus }) {
+  const stages = [
+    { id: OrderStatus.PENDING, label: 'INGRESADO' },
+    { id: OrderStatus.COMPLETED, label: 'PREPARADO' },
+    { id: OrderStatus.DISPATCHED, label: 'DESPACHADO' },
+    { id: OrderStatus.ARCHIVED, label: 'HISTÓRICO' }
+  ];
+
+  const currentIndex = stages.findIndex(s => s.id === currentStatus);
+
+  return (
+    <div className="flex flex-col gap-0 relative ml-2 py-4">
+      {stages.map((stage, index) => {
+        const isCompleted = index < currentIndex;
+        const isCurrent = index === currentIndex;
+        const isFuture = index > currentIndex;
+
+        return (
+          <div key={stage.id} className="flex gap-4 items-start relative pb-6 last:pb-0">
+            {/* Connector Line */}
+            {index < stages.length - 1 && (
+              <div className={`absolute left-[11px] top-6 w-[2px] h-[calc(100%-12px)] ${isCompleted ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+            )}
+            
+            {/* Dot */}
+            <div className={`z-10 w-6 h-6 rounded-full flex items-center justify-center transition-all duration-500 ${
+              isCompleted ? 'bg-emerald-500 shadow-lg shadow-emerald-200' :
+              isCurrent ? 'bg-white border-4 border-teal-500 ring-4 ring-teal-500/20' :
+              'bg-slate-100 border-2 border-slate-200'
+            }`}>
+              {isCompleted ? <Check size={12} className="text-white" /> : 
+               isCurrent ? <div className="w-1.5 h-1.5 bg-teal-500 rounded-full animate-pulse" /> : null}
+            </div>
+
+            {/* Label */}
+            <div className={`pt-0.5 flex flex-col ${isCurrent ? 'scale-105 origin-left transition-transform' : ''}`}>
+              <span className={`text-[11px] font-black tracking-widest ${
+                isCompleted ? 'text-emerald-600 opacity-60' :
+                isCurrent ? 'text-slate-900' :
+                'text-slate-300'
+              }`}>{stage.label}</span>
+              {isCurrent && <span className="text-[8px] font-bold text-teal-500 uppercase tracking-widest mt-0.5">Etapa Actual</span>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function NewOrderForm({ onAdd, onBack, isSaving }: any) {
   const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
   const [aiText, setAiText] = useState('');
@@ -407,14 +464,54 @@ function NewOrderForm({ onAdd, onBack, isSaving }: any) {
 }
 
 function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: any) {
-  const [isEditingPackaging, setIsEditingPackaging] = useState(false);
-  const [carrier, setCarrier] = useState(order.carrier || '');
+  // Local States for Hierarchical Selection and Extra Order Numbers
+  const [carrierCategory, setCarrierCategory] = useState('');
+  const [carrierDetail, setCarrierDetail] = useState('');
+  const [customCarrier, setCustomCarrier] = useState('');
+  const [customerNumber, setCustomerNumber] = useState(order.customerNumber || '');
+  const [orderNumbers, setOrderNumbers] = useState(order.orderNumber || '');
   const [packaging, setPackaging] = useState<PackagingEntry[]>(order.detailedPackaging || []);
-  const [newPackage, setNewPackage] = useState({ type: 'Caja', quantity: 1, deposit: 'D1' });
+  const [newPackage, setNewPackage] = useState({ 
+    type: 'Caja', 
+    quantity: 1, 
+    deposit: 'D1',
+    customType: '',
+    customDeposit: ''
+  });
+
+  // Load existing carrier if possible
+  useEffect(() => {
+    if (order.carrier) {
+      if (order.carrier.includes('Viajante:')) {
+        setCarrierCategory('Viajantes');
+        setCarrierDetail(order.carrier.replace('Viajante: ', ''));
+      } else if (order.carrier.includes('Vendedor:')) {
+        setCarrierCategory('Vendedores');
+        setCarrierDetail(order.carrier.replace('Vendedor: ', ''));
+      } else {
+        const cats = ['Transporte', 'Comisionista', 'Retiro Personal', 'Expreso'];
+        const found = cats.find(c => order.carrier.startsWith(`${c}:`));
+        if (found) {
+          setCarrierCategory(found);
+          setCustomCarrier(order.carrier.replace(`${found}: `, ''));
+        }
+      }
+    }
+  }, [order.carrier]);
 
   const addPackage = () => {
-    const entry = { id: Date.now().toString(), ...newPackage };
+    const finalType = newPackage.type === 'Otro' ? newPackage.customType : newPackage.type;
+    const finalDeposit = newPackage.deposit === 'Otro' ? newPackage.customDeposit : newPackage.deposit;
+    if (!finalType || !finalDeposit) return alert("Completa los datos del bulto");
+
+    const entry = { 
+      id: Date.now().toString(), 
+      type: finalType, 
+      quantity: newPackage.quantity, 
+      deposit: finalDeposit 
+    };
     setPackaging([...packaging, entry]);
+    setNewPackage({ ...newPackage, customType: '', customDeposit: '' });
   };
 
   const removePackage = (id: string) => {
@@ -422,11 +519,33 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
   };
 
   const saveDetails = () => {
-    onUpdate({ ...order, detailedPackaging: packaging, carrier });
-    setIsEditingPackaging(false);
+    let finalCarrier = '';
+    if (carrierCategory === 'Viajantes' || carrierCategory === 'Vendedores') {
+      finalCarrier = `${carrierCategory === 'Viajantes' ? 'Viajante' : 'Vendedor'}: ${carrierDetail}`;
+    } else if (carrierCategory) {
+      finalCarrier = `${carrierCategory}: ${customCarrier}`;
+    }
+
+    onUpdate({ 
+      ...order, 
+      detailedPackaging: packaging, 
+      carrier: finalCarrier,
+      customerNumber,
+      orderNumber: orderNumbers
+    });
   };
 
+  const addOrderNumber = () => {
+    const next = prompt("Ingrese nuevo número de orden:");
+    if (next) {
+      setOrderNumbers(orderNumbers ? `${orderNumbers}, ${next}` : next);
+    }
+  };
+
+  const totalBultos = packaging.reduce((acc, p) => acc + (p.quantity || 0), 0);
+
   const advanceStage = () => {
+    saveDetails();
     const stages = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
     const nextIdx = stages.indexOf(order.status) + 1;
     if (nextIdx < stages.length) {
@@ -440,82 +559,189 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: a
       <div className="bg-white w-full max-w-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
         <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors"><X/></button>
         
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-2">
+        {/* Header con Etiquetas a la Izquierda */}
+        <div className="mb-6 flex flex-col items-start gap-1">
+          <div className="flex items-center gap-2">
             <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{order.source}</span>
-            <span className="text-[10px] font-black text-teal-600 uppercase tracking-tighter">ORDEN #{order.orderNumber}</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] font-black text-teal-600 uppercase tracking-tighter">ORDEN {orderNumbers}</span>
+              <button onClick={addOrderNumber} className="p-1 bg-teal-50 text-teal-600 rounded-lg hover:bg-teal-100 transition-colors"><Plus size={10}/></button>
+            </div>
           </div>
-          <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic pr-8">{order.customerName}</h2>
+          
+          <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic pr-8 mt-2 uppercase">{order.customerName}</h2>
+          
+          <div className="mt-2 flex items-center gap-2">
+            <UserCircle2 size={14} className="text-slate-400" />
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">CLIENTE</span>
+              <input 
+                type="text" 
+                className="bg-slate-50 px-2 py-0.5 rounded text-[11px] font-black text-slate-900 outline-none border-b-2 border-transparent focus:border-teal-500 transition-all w-24"
+                value={customerNumber}
+                onChange={e => setCustomerNumber(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3">
              <MapPin size={10} className="text-orange-500" /> {order.locality}
           </div>
         </div>
 
+        {/* Gestión de Bultos */}
         <div className="space-y-4 mb-8">
-          {/* Status Progress */}
-          <div className="p-5 bg-slate-50 rounded-[32px] border border-slate-100">
-             <div className="flex justify-between items-center mb-4">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Estado Actual</span>
-                <span className="text-[10px] font-black text-teal-600 uppercase bg-white px-4 py-1.5 rounded-full shadow-sm border border-teal-50">{order.status}</span>
-             </div>
-             
-             {/* Dynamic Content based on Stage */}
-             {order.status === OrderStatus.COMPLETED && (
-               <div className="space-y-4 border-t pt-4 mt-2">
-                  <h4 className="text-[9px] font-black text-slate-800 uppercase tracking-widest">Detalle de Bultos</h4>
-                  <div className="space-y-2">
-                    {packaging.map(p => (
-                      <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
-                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-slate-50 rounded-xl flex items-center justify-center font-black text-xs text-slate-400">{p.quantity}</div>
-                            <span className="text-xs font-bold text-slate-700">{p.type} <span className="text-[8px] opacity-30">({p.deposit})</span></span>
-                         </div>
-                         <button onClick={() => removePackage(p.id)} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
-                      </div>
-                    ))}
-                    <div className="grid grid-cols-3 gap-2">
-                       <input type="number" className="bg-white border rounded-xl p-2 text-xs font-bold outline-none" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
-                       <select className="bg-white border rounded-xl p-2 text-[10px] font-black uppercase outline-none" value={newPackage.type} onChange={e=>setNewPackage({...newPackage, type: e.target.value})}>
-                          <option>Caja</option><option>Pack</option><option>Unidad</option><option>Bolsa</option>
-                       </select>
-                       <button onClick={addPackage} className="bg-teal-500 text-white rounded-xl flex items-center justify-center"><Plus size={16}/></button>
+           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
+              <div className="flex justify-between items-center mb-4">
+                <h4 className="text-[9px] font-black text-slate-800 uppercase tracking-widest">Gestión de Bultos por Depósito</h4>
+                <div className="flex items-center gap-2 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm">
+                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Total:</span>
+                  <span className="text-xs font-black text-teal-600">{totalBultos}</span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {packaging.map(p => (
+                  <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-100 shadow-sm animate-in slide-in-from-left duration-200">
+                     <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-slate-50 rounded-xl flex items-center justify-center font-black text-xs text-slate-400">{p.quantity}</div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-slate-700 uppercase">{p.type}</span>
+                          <span className="text-[8px] font-black text-teal-500 uppercase tracking-widest">{p.deposit}</span>
+                        </div>
+                     </div>
+                     <button onClick={() => removePackage(p.id)} className="text-red-300 hover:text-red-500 transition-colors"><Trash2 size={14}/></button>
+                  </div>
+                ))}
+                
+                {/* Selector de nuevo bulto */}
+                <div className="bg-white/50 p-4 rounded-3xl border border-dashed border-slate-300 space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest ml-1">Depósito</label>
+                      <select 
+                        className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none shadow-sm"
+                        value={newPackage.deposit}
+                        onChange={e => setNewPackage({...newPackage, deposit: e.target.value})}
+                      >
+                        <option value="D1">D1</option>
+                        <option value="F">F</option>
+                        <option value="E">E</option>
+                        <option value="Otro">Otro...</option>
+                      </select>
+                      {newPackage.deposit === 'Otro' && (
+                        <input className="w-full bg-white border mt-1 rounded-xl p-2 text-[10px] font-bold outline-none uppercase" placeholder="Especifique..." value={newPackage.customDeposit} onChange={e=>setNewPackage({...newPackage, customDeposit: e.target.value})}/>
+                      )}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[7px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo de Bulto</label>
+                      <select 
+                        className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none shadow-sm"
+                        value={newPackage.type}
+                        onChange={e => setNewPackage({...newPackage, type: e.target.value})}
+                      >
+                        <option value="Caja">Caja</option>
+                        <option value="Pack">Pack</option>
+                        <option value="Unidad">Unidad</option>
+                        <option value="Bolsa">Bolsa</option>
+                        <option value="Otro">Otro...</option>
+                      </select>
+                      {newPackage.type === 'Otro' && (
+                        <input className="w-full bg-white border mt-1 rounded-xl p-2 text-[10px] font-bold outline-none uppercase" placeholder="Especifique..." value={newPackage.customType} onChange={e=>setNewPackage({...newPackage, customType: e.target.value})}/>
+                      )}
                     </div>
                   </div>
-               </div>
-             )}
+                  <div className="flex gap-2">
+                    <input type="number" className="w-16 bg-white border border-slate-100 rounded-xl p-2 text-xs font-black outline-none shadow-sm" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
+                    <button onClick={addPackage} className="flex-1 bg-teal-500 text-white rounded-xl flex items-center justify-center gap-2 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-teal-200 active:scale-95 transition-all"><Plus size={16}/> AGREGAR</button>
+                  </div>
+                </div>
+              </div>
+           </div>
 
-             {order.status === OrderStatus.DISPATCHED && (
-               <div className="space-y-3 border-t pt-4 mt-2">
-                  <h4 className="text-[9px] font-black text-slate-800 uppercase tracking-widest">Información de Despacho</h4>
-                  <input 
-                    className="w-full bg-white border rounded-2xl p-4 text-xs font-bold outline-none focus:border-teal-500" 
-                    placeholder="Nombre del Transporte / Chofer" 
-                    value={carrier}
-                    onChange={e => setCarrier(e.target.value)}
-                  />
-               </div>
-             )}
-          </div>
+           {/* Sistema de Despacho Inteligente */}
+           <div className="p-6 bg-indigo-50/40 rounded-[32px] border border-indigo-100/50 space-y-4">
+              <h4 className="text-[9px] font-black text-indigo-900 uppercase tracking-widest">Sistema de Despacho</h4>
+              
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Categoría</label>
+                  <select 
+                    className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none focus:border-indigo-500 shadow-sm"
+                    value={carrierCategory}
+                    onChange={e => { setCarrierCategory(e.target.value); setCarrierDetail(''); setCustomCarrier(''); }}
+                  >
+                    <option value="">Seleccione Categoría...</option>
+                    <option value="Viajantes">Viajantes</option>
+                    <option value="Vendedores">Vendedores</option>
+                    <option value="Transporte">Transporte</option>
+                    <option value="Comisionista">Comisionista</option>
+                    <option value="Retiro Personal">Retiro Personal</option>
+                    <option value="Expreso">Expreso</option>
+                  </select>
+                </div>
 
-          <div className="p-5 bg-slate-50 rounded-[32px] border border-slate-100">
-             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observaciones</span>
-             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones específicas"}</p>
+                {/* Sub-selectors */}
+                {carrierCategory === 'Viajantes' && (
+                  <div className="space-y-1 animate-in zoom-in duration-200">
+                    <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Viajante Específico</label>
+                    <select className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-sm" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
+                      <option value="">Seleccione...</option>
+                      <option value="Matías">Matías</option>
+                      <option value="Nicolás">Nicolás</option>
+                    </select>
+                  </div>
+                )}
+
+                {carrierCategory === 'Vendedores' && (
+                  <div className="space-y-1 animate-in zoom-in duration-200">
+                    <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Vendedor Específico</label>
+                    <select className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none shadow-sm" value={carrierDetail} onChange={e=>setCarrierDetail(e.target.value)}>
+                      <option value="">Seleccione...</option>
+                      <option value="Mauro">Mauro</option>
+                      <option value="Gustavo">Gustavo</option>
+                    </select>
+                  </div>
+                )}
+
+                {['Transporte', 'Comisionista', 'Retiro Personal', 'Expreso'].includes(carrierCategory) && (
+                  <div className="space-y-1 animate-in zoom-in duration-200">
+                    <label className="text-[7px] font-black text-indigo-300 uppercase tracking-widest ml-1">Detalle de {carrierCategory}</label>
+                    <input 
+                      className="w-full bg-white border border-indigo-100 rounded-2xl p-4 text-xs font-bold outline-none focus:border-indigo-500 shadow-sm uppercase" 
+                      placeholder="Nombre / Empresa / Detalle" 
+                      value={customCarrier}
+                      onChange={e => setCustomCarrier(e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+           </div>
+
+          {/* Observaciones Logísticas */}
+          <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
+             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observaciones Logísticas</span>
+             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones específicas de despacho"}</p>
           </div>
         </div>
 
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-             <button onClick={onWhatsApp} className="bg-emerald-500 text-white py-4 rounded-3xl font-black uppercase text-[10px] tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all"><MessageCircle size={16}/> WhatsApp</button>
-             <button onClick={advanceStage} className="bg-slate-900 text-white py-4 rounded-3xl font-black uppercase text-[10px] tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">Siguiente <ChevronRight size={14}/></button>
-          </div>
+        <div className="space-y-3 pt-4">
+          <button 
+            onClick={advanceStage} 
+            className="w-full bg-slate-900 text-white py-5 rounded-[28px] font-black uppercase text-xs tracking-[0.2em] shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
+          >
+            Avanzar Etapa <ChevronRight size={18}/>
+          </button>
           
           <div className="grid grid-cols-2 gap-3 mt-2">
-            <button onClick={() => { if(confirm("¿Eliminar pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-3xl text-[9px] font-black uppercase border border-red-100 active:bg-red-100">Eliminar</button>
-            { (order.status === OrderStatus.COMPLETED || order.status === OrderStatus.DISPATCHED) && (
-              <button onClick={saveDetails} className="py-4 bg-teal-50 text-teal-600 rounded-3xl text-[9px] font-black uppercase border border-teal-100">Guardar Cambios</button>
-            )}
-            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-3xl text-[9px] font-black uppercase active:bg-slate-200">Cerrar</button>
+            <button onClick={() => { if(confirm("¿Eliminar pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[9px] font-black uppercase border border-red-100 active:bg-red-100 transition-all">Eliminar</button>
+            <button onClick={saveDetails} className="py-4 bg-teal-50 text-teal-600 rounded-2xl text-[9px] font-black uppercase border border-teal-100 transition-all">Guardar Cambios</button>
+            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-2xl text-[9px] font-black uppercase active:bg-slate-200 transition-all col-span-2">Cerrar</button>
           </div>
+
+          <button onClick={onWhatsApp} className="w-full bg-emerald-500 text-white py-4 rounded-[24px] font-black uppercase text-[10px] tracking-[0.2em] shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 active:scale-95 transition-all mt-4 border border-emerald-400">
+            <MessageCircle size={18}/> Notificar vía WhatsApp
+          </button>
         </div>
       </div>
     </div>
@@ -626,63 +852,111 @@ function TrackingInternalView({ orders, onBack, onSelectOrder }: any) {
   );
 }
 
-function CustomerPortal({ onBack, orders }: any) {
+function CustomerPortal({ onBack, orders, onWhatsApp, onSupportWhatsApp }: any) {
   const [s, setS] = useState('');
-  const r = orders?.filter((o:any) => (o.customerName?.toLowerCase().includes(s.toLowerCase()) || o.customerNumber?.includes(s)) && o.status !== OrderStatus.ARCHIVED) || [];
+  const [code, setCode] = useState('');
+
+  const r = useMemo(() => {
+    if (!s && !code) return [];
+    return orders?.filter((o: any) => {
+      const matchName = s ? o.customerName?.toLowerCase().includes(s.toLowerCase()) : true;
+      const matchCode = code ? (o.customerNumber?.includes(code) || o.orderNumber?.includes(code.toUpperCase())) : true;
+      return matchName && matchCode && o.status !== OrderStatus.ARCHIVED;
+    }) || [];
+  }, [s, code, orders]);
   
   return (
-    <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col">
+    <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col pb-32">
       <header className="flex items-center gap-4">
         <button onClick={onBack} className="p-4 bg-white border border-slate-100 rounded-2xl shadow-sm text-slate-400 active:scale-90 transition-all"><ArrowLeft/></button>
         <h2 className="text-2xl font-black italic tracking-tighter">Consulta de Pedidos</h2>
       </header>
       
-      <div className="bg-white p-8 rounded-[48px] border-2 border-slate-100 space-y-4 shadow-xl shadow-slate-200/50">
+      <div className="bg-white p-8 rounded-[48px] border-2 border-slate-100 space-y-6 shadow-xl shadow-slate-200/50">
         <div className="w-14 h-14 bg-teal-500/10 text-teal-600 rounded-2xl flex items-center justify-center mb-2">
-           <HelpCircle size={28} />
+           <Search size={28} />
         </div>
-        <h3 className="font-black text-2xl italic leading-[0.85]">¿Dónde está mi pedido?</h3>
-        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Ingresa tu nombre para ver el estado real del depósito.</p>
-        <input 
-          className="w-full bg-slate-50 p-6 rounded-[28px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-base uppercase tracking-tighter shadow-inner transition-all" 
-          placeholder="Ej: Bazar Firmat..." 
-          value={s} 
-          onChange={e=>setS(e.target.value)} 
-        />
+        <h3 className="font-black text-2xl italic leading-[0.85]">Seguimiento de Envío</h3>
+        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Ingresa los datos para localizar tu envío en tiempo real.</p>
+        
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-[9px] font-black text-slate-300 uppercase tracking-widest ml-2 italic">Buscar por Nombre o Comercio</label>
+            <input 
+              className="w-full bg-slate-50 p-5 rounded-[24px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-sm uppercase tracking-tighter shadow-inner transition-all" 
+              placeholder="Ej: Bazar Firmat..." 
+              value={s} 
+              onChange={e=>setS(e.target.value)} 
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[9px] font-black text-slate-300 uppercase tracking-widest ml-2 italic">Buscar por N° Pedido o Cliente</label>
+            <input 
+              className="w-full bg-slate-50 p-5 rounded-[24px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-sm uppercase tracking-tighter shadow-inner transition-all" 
+              placeholder="Ej: 5542 o 1450" 
+              value={code} 
+              onChange={e=>setCode(e.target.value)} 
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-4 flex-1">
-        {s.length > 2 ? (
+      <div className="space-y-12 flex-1 pt-4">
+        {(s.length > 2 || code.length > 0) ? (
           r.length > 0 ? r.map((o:any) => (
-            <div key={o.id} className="bg-white p-10 rounded-[48px] shadow-2xl border-2 border-slate-50 animate-in fade-in slide-in-from-bottom duration-300 relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-8 opacity-5"><Package size={80} /></div>
-              <h4 className="font-black text-3xl mb-3 text-slate-800 uppercase italic tracking-tighter leading-[0.8]">{o.customerName}</h4>
-              <div className="flex flex-col mb-6">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Estado Logístico</span>
-                <span className={`text-2xl font-black uppercase italic tracking-tighter ${
-                  o.status === OrderStatus.PENDING ? 'text-orange-500' :
-                  o.status === OrderStatus.COMPLETED ? 'text-emerald-500' : 'text-indigo-600'
-                }`}>{o.status}</span>
-              </div>
-              <div className="flex items-center gap-4 p-5 bg-slate-50 rounded-3xl border border-slate-100">
-                 <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center text-teal-500 shadow-sm">
-                    <Truck size={20} />
-                 </div>
-                 <p className="text-[11px] font-bold text-slate-500 italic uppercase">El transporte te notificará en cuanto salga de depósito.</p>
+            <div key={o.id} className="space-y-4 animate-in fade-in slide-in-from-bottom duration-300">
+              <div className="bg-white p-10 rounded-[56px] shadow-2xl border-2 border-slate-50 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-8 opacity-5"><Package size={80} /></div>
+                
+                <div className="mb-6 border-b pb-6">
+                  <h4 className="font-black text-4xl mb-2 text-slate-800 uppercase italic tracking-tighter leading-[0.8]">{o.customerName}</h4>
+                  <div className="flex items-center gap-2 text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mt-3">
+                     ORDEN #{o.orderNumber} • {o.locality}
+                  </div>
+                </div>
+
+                <div className="mb-8">
+                  <h5 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-6 border-l-4 border-orange-500 pl-3">Cronograma del Proceso</h5>
+                  <Timeline currentStatus={o.status} />
+                </div>
+                
+                <div className="flex items-center gap-4 p-5 bg-slate-50 rounded-[32px] border border-slate-100">
+                   <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-teal-500 shadow-sm">
+                      <Truck size={24} />
+                   </div>
+                   <p className="text-[11px] font-bold text-slate-500 italic uppercase leading-tight">Serás notificado por el transporte al salir del depósito.</p>
+                </div>
               </div>
             </div>
           )) : (
             <div className="text-center py-20 opacity-30">
-               <Search size={48} className="mx-auto mb-4" />
-               <p className="text-xs font-black uppercase tracking-widest italic leading-relaxed">No encontramos pedidos activos <br/> con ese nombre.</p>
+               <Search size={48} className="mx-auto mb-4 text-slate-300" />
+               <p className="text-xs font-black uppercase tracking-widest italic leading-relaxed text-slate-400">No encontramos registros activos <br/> con esos datos.</p>
             </div>
           )
-        ) : s.length > 0 && (
-          <p className="text-center text-[10px] font-black text-slate-300 uppercase tracking-widest animate-pulse">Sigue escribiendo...</p>
+        ) : (s.length > 0 || code.length > 0) && (
+          <p className="text-center text-[10px] font-black text-slate-300 uppercase tracking-widest animate-pulse italic mt-8">Buscando información...</p>
         )}
       </div>
 
-      <p className="text-center text-[9px] font-black text-slate-300 uppercase tracking-widest py-8 italic">D&G Logistics Intelligence • Firmat</p>
+      {/* Botón de Soporte General al Final de la Modal (Reemplaza Centro de Ayuda) */}
+      <div className="pt-16 pb-20 flex flex-col items-center gap-8 border-t border-slate-100 mt-12">
+          <div className="space-y-2 text-center">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] italic">¿Necesitas asistencia directa?</p>
+            <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">Atención personalizada de Lunes a Sábado</p>
+          </div>
+          <button 
+            onClick={onSupportWhatsApp}
+            className="w-full max-w-[340px] bg-slate-900 text-white py-6 rounded-[40px] font-black uppercase text-xs tracking-[0.2em] shadow-2xl shadow-slate-300 flex items-center justify-center gap-4 active:scale-95 transition-all border-b-4 border-slate-700"
+          >
+            <MessageCircle size={22} className="text-emerald-400"/> SOPORTE OPERATIVO
+          </button>
+          <div className="flex flex-col items-center gap-1 opacity-20 mt-4">
+            <h1 className="text-3xl font-black italic tracking-tighter">D&G</h1>
+            <p className="text-[9px] font-black uppercase tracking-[0.6em]">Logistics Intelligence</p>
+          </div>
+      </div>
     </div>
   );
 }
@@ -712,7 +986,7 @@ function LoginModal({ onLogin, onClientAccess }: any) {
            </div>
         </div>
       </div>
-      <p className="mt-10 text-[9px] font-black text-white/20 uppercase tracking-[0.6em] italic">FIRMAT, SANTA FE • VERSION 3.0</p>
+      <p className="mt-10 text-[9px] font-black text-white/20 uppercase tracking-[0.6em] italic">FIRMAT, SANTA FE • VERSION 3.3</p>
     </div>
   );
 }
