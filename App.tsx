@@ -5,13 +5,14 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal
+  Database, ServerCrash, Copy, Terminal, Info
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types';
 import { supabase } from './supabaseClient';
 
 /**
- * SQL PARA REPARAR LA BASE DE DATOS (Copiar y pegar en SQL Editor de Supabase):
+ * SQL DEFINITIVO PARA REPARAR LA BASE DE DATOS:
+ * (Este código borra la tabla vieja y crea la nueva con permisos totales)
  * 
  * DROP TABLE IF EXISTS orders;
  * CREATE TABLE orders (
@@ -27,7 +28,7 @@ import { supabase } from './supabaseClient';
  *   created_at timestamp with time zone DEFAULT now()
  * );
  * ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
- * CREATE POLICY "Acceso total anonimo" ON orders FOR ALL USING (true) WITH CHECK (true);
+ * CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);
  */
 
 export default function App() {
@@ -64,7 +65,6 @@ export default function App() {
       
       if (error) throw error;
 
-      // Mapear de snake_case (DB) a camelCase (App)
       const mappedData = (data || []).map((o: any) => ({
         id: o.id,
         orderNumber: o.order_number,
@@ -80,7 +80,7 @@ export default function App() {
 
       setOrders(mappedData);
     } catch (error: any) {
-      console.error("Error Supabase:", error);
+      console.error("Error al cargar:", error);
       setDbError({ message: error.message, code: error.code });
     } finally {
       setIsLoading(false);
@@ -136,14 +136,14 @@ export default function App() {
       notes: updatedOrder.notes
     }).eq('id', updatedOrder.id);
     
-    if (error) alert("Error al actualizar: " + error.message);
+    if (error) alert("Error: " + error.message);
     setSelectedOrder(updatedOrder);
     fetchOrders();
   };
 
   const handleDeleteOrder = async (id: string) => {
     const { error } = await supabase.from('orders').delete().eq('id', id);
-    if (error) alert("Error al eliminar: " + error.message);
+    if (error) alert("Error: " + error.message);
     setSelectedOrder(null);
     fetchOrders();
   };
@@ -151,7 +151,7 @@ export default function App() {
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
     setIsSaving(true);
     try {
-      // Usar nombres exactos de columnas snake_case para Postgres
+      // FORZAR SNAKE_CASE PARA COMPATIBILIDAD CON SQL
       const payload = {
         order_number: newOrderData.orderNumber,
         customer_number: String(newOrderData.customerNumber),
@@ -172,10 +172,10 @@ export default function App() {
       setIsNewOrderModalOpen(false);
       setView('PENDING');
       await fetchOrders();
-      alert("✅ Pedido guardado correctamente.");
+      alert("✅ Pedido confirmado con éxito.");
     } catch (err: any) {
       console.error("Save Error:", err);
-      alert(`❌ ERROR AL GUARDAR: ${err.message}\n\nEs probable que la tabla 'orders' no esté creada correctamente.`);
+      alert(`❌ ERROR DE CARGA: ${err.message}\n\nPASO A SEGUIR: Haz clic en el botón rojo 'Reparar DB' en el Dashboard y sigue las instrucciones.`);
       setDbError({ message: err.message });
     } finally {
       setIsSaving(false);
@@ -201,8 +201,8 @@ export default function App() {
             <nav className="flex-1 p-4 space-y-1">
               <SidebarItem icon={<LayoutDashboard size={20}/>} label="Dashboard" active={view === 'DASHBOARD'} onClick={() => { setView('DASHBOARD'); setIsSidebarOpen(false); }} />
               <div className="h-px bg-slate-100 my-4" />
-              <SidebarItem icon={<ClipboardList size={20}/>} label="Pendientes de Carga" active={view === 'PENDING'} onClick={() => { setView('PENDING'); setIsSidebarOpen(false); }} />
-              <SidebarItem icon={<CheckCircle2 size={20}/>} label="Carga Preparada" active={view === 'COMPLETED'} onClick={() => { setView('COMPLETED'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<ClipboardList size={20}/>} label="Pendientes" active={view === 'PENDING'} onClick={() => { setView('PENDING'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<CheckCircle2 size={20}/>} label="Preparados" active={view === 'COMPLETED'} onClick={() => { setView('COMPLETED'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<Truck size={20}/>} label="En Despacho" active={view === 'DISPATCHED'} onClick={() => { setView('DISPATCHED'); setIsSidebarOpen(false); }} />
               <div className="h-px bg-slate-100 my-4" />
               <SidebarItem icon={<PlusSquare size={20}/>} label="CARGA DE ENVÍO" onClick={() => { setIsNewOrderModalOpen(true); setIsSidebarOpen(false); }} />
@@ -228,13 +228,17 @@ export default function App() {
             <div className="flex items-start gap-4">
               <ServerCrash className="text-red-500 shrink-0" size={24} />
               <div>
-                <h4 className="font-black text-red-800 text-sm uppercase">Error de Base de Datos</h4>
+                <h4 className="font-black text-red-800 text-sm uppercase">Error Estructural Detectado</h4>
                 <p className="text-[10px] text-red-600 font-bold leading-relaxed">{dbError.message}</p>
               </div>
             </div>
+            <div className="bg-white/50 p-3 rounded-2xl flex items-center gap-3 border border-red-100">
+               <Info className="text-red-400 shrink-0" size={16} />
+               <p className="text-[9px] font-bold text-red-700 italic">La tabla 'orders' ya existe pero no es compatible. Debes borrarla y crearla de nuevo.</p>
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              <button onClick={fetchOrders} className="bg-red-500 text-white py-3 rounded-2xl text-[9px] font-black uppercase">Reintentar</button>
-              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2"><Terminal size={12}/> Reparar DB</button>
+              <button onClick={fetchOrders} className="bg-red-500 text-white py-3 rounded-2xl text-[9px] font-black uppercase shadow-lg">Reintentar</button>
+              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2 shadow-lg"><Terminal size={12}/> Reparar DB</button>
             </div>
           </div>
         )}
@@ -243,11 +247,14 @@ export default function App() {
           <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[1000] p-6 flex flex-col items-center justify-center space-y-6">
             <button onClick={() => setShowSqlHelp(false)} className="absolute top-6 right-6 text-white/50"><X size={32}/></button>
             <div className="text-center text-white space-y-2">
-              <h2 className="text-2xl font-black italic">Instrucciones de Reparación</h2>
-              <p className="text-xs text-white/60">Copia este código y pégalo en el <b>SQL Editor</b> de tu Supabase.</p>
+              <h2 className="text-2xl font-black italic">Reparar Tabla de Pedidos</h2>
+              <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest leading-relaxed">Esto borrará los datos actuales y creará la estructura correcta.</p>
             </div>
-            <div className="w-full bg-slate-800 p-4 rounded-3xl font-mono text-[9px] text-teal-400 border border-teal-500/30 overflow-x-auto">
-              <pre>{`DROP TABLE IF EXISTS orders;
+            <div className="w-full bg-slate-800 p-5 rounded-[32px] font-mono text-[9px] text-teal-400 border-2 border-teal-500/30 overflow-x-auto shadow-2xl">
+              <pre>{`-- 1. Borrar tabla vieja
+DROP TABLE IF EXISTS orders;
+
+-- 2. Crear tabla nueva
 CREATE TABLE orders (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
   order_number text NOT NULL,
@@ -260,17 +267,19 @@ CREATE TABLE orders (
   reviewer text,
   created_at timestamp with time zone DEFAULT now()
 );
+
+-- 3. Habilitar permisos
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre>
             </div>
             <button 
               onClick={() => {
                 navigator.clipboard.writeText(`DROP TABLE IF EXISTS orders; CREATE TABLE orders ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, order_number text NOT NULL, customer_number text, customer_name text NOT NULL, locality text DEFAULT 'GENERAL', status text DEFAULT 'PENDIENTE', notes text, source text DEFAULT 'Manual', reviewer text, created_at timestamp with time zone DEFAULT now() ); ALTER TABLE orders ENABLE ROW LEVEL SECURITY; CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`);
-                alert("Copiado al portapapeles. Pégalo en Supabase SQL Editor.");
+                alert("Copiado. Pégalo en Supabase SQL Editor y dale a RUN.");
               }}
-              className="w-full bg-teal-500 text-slate-900 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2"
+              className="w-full bg-teal-500 text-slate-900 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 shadow-xl"
             >
-              <Copy size={16}/> Copiar Código SQL
+              <Copy size={16}/> Copiar SQL para Reparar
             </button>
           </div>
         )}
@@ -300,7 +309,7 @@ CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}
               </div>
               <div className="text-left">
                 <h4 className="font-black text-white uppercase tracking-tighter text-sm">CARGA DE ENVÍO</h4>
-                <p className="text-[10px] font-bold text-slate-400">Nuevo ingreso manual</p>
+                <p className="text-[10px] font-bold text-slate-400">Ingreso manual de nuevo pedido</p>
               </div>
               <ChevronRight className="ml-auto text-slate-500" />
             </button>
@@ -327,7 +336,7 @@ CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}
               {filteredOrders.length > 0 ? filteredOrders.map(order => (
                 <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} allOrders={orders} />
               )) : (
-                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase">No hay pedidos registrados</p>
+                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase">Sin pedidos registrados</p>
               )}
             </div>
           </div>
@@ -373,8 +382,8 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
   const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
   
   const submit = () => {
-    if(!form.orderNumber || !form.nro || !form.name) {
-      return alert("Complete los campos obligatorios: Nº Orden, Nº Cliente y Razón Social");
+    if(!form.orderNumber || !form.name) {
+      return alert("Complete los campos: Nº Orden y Razón Social");
     }
     
     onAdd({
@@ -393,7 +402,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800">Carga de Envío</h2>
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Nuevo pedido manual</p>
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Nuevo pedido logística</p>
       </div>
       <div className="space-y-4">
         <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
@@ -401,7 +410,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
           <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="1450" />
           <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="FIRMAT" />
         </div>
-        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Razón Social / Comercio" />
+        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre del Comercio" />
         <div className="space-y-2">
           <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Notas / Transporte</label>
           <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
@@ -427,11 +436,12 @@ function SidebarItem({ icon, label, active, onClick, danger }: any) {
   );
 }
 
+// Fix: Cast the second argument of React.cloneElement to any to resolve TS errors regarding 'size' property
 function StatCard({ count, label, color, icon, onClick }: any) {
   return (
     <button onClick={onClick} className={`${color} p-6 rounded-[32px] text-white flex flex-col justify-between h-40 text-left shadow-lg active:scale-95 transition-all overflow-hidden relative`}>
-      <div className="absolute -right-4 -top-4 opacity-10">{React.cloneElement(icon as React.ReactElement, { size: 90 })}</div>
-      <div className="bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center backdrop-blur-md">{React.cloneElement(icon as React.ReactElement, { size: 16 })}</div>
+      <div className="absolute -right-4 -top-4 opacity-10">{React.cloneElement(icon as React.ReactElement, { size: 90 } as any)}</div>
+      <div className="bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center backdrop-blur-md">{React.cloneElement(icon as React.ReactElement, { size: 16 } as any)}</div>
       <div>
         <h3 className="text-3xl font-black">{count}</h3>
         <p className="text-[9px] font-black uppercase tracking-widest opacity-80">{label}</p>
@@ -440,10 +450,11 @@ function StatCard({ count, label, color, icon, onClick }: any) {
   );
 }
 
+// Fix: Cast the second argument of React.cloneElement to any to resolve TS errors regarding 'size' property
 function NavBtn({ icon, active, onClick }: any) {
   return (
     <button onClick={onClick} className={`p-4 rounded-2xl transition-all ${active ? 'text-teal-500 bg-teal-50' : 'text-slate-300'}`}>
-      {React.cloneElement(icon, { size: 24 })}
+      {React.cloneElement(icon, { size: 24 } as any)}
     </button>
   );
 }
@@ -496,8 +507,8 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
              <span className="text-[10px] font-black text-teal-600 uppercase">{order.status}</span>
           </div>
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <span className="text-[9px] font-black text-slate-400 uppercase">Notas de Logística</span>
-             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas"}</p>
+             <span className="text-[9px] font-black text-slate-400 uppercase">Notas</span>
+             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas adicionales"}</p>
           </div>
         </div>
 
@@ -514,7 +525,7 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
             }}
             className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2"
           >
-            Avanzar Etapa <ChevronRight size={16}/>
+            Siguiente Etapa <ChevronRight size={16}/>
           </button>
           
           <div className="grid grid-cols-2 gap-3">
@@ -540,7 +551,7 @@ function TrackingInternalView({ orders, onBack, onSelectOrder }: any) {
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
         <input 
           className="w-full bg-white border-2 border-slate-100 p-4 pl-12 rounded-3xl text-sm font-bold outline-none focus:border-teal-500" 
-          placeholder="Buscar cliente o Nº..." 
+          placeholder="Buscar comercio o Nº..." 
           value={q} 
           onChange={e=>setQ(e.target.value)} 
         />
@@ -587,7 +598,7 @@ function CustomerPortal({ onBack, orders }: any) {
           <div key={o.id} className="bg-white p-8 rounded-[40px] shadow-lg border-2 border-slate-50 animate-in fade-in slide-in-from-bottom duration-300">
             <h4 className="font-black text-xl mb-2 text-slate-800 uppercase italic tracking-tighter">{o.customerName}</h4>
             <div className="flex flex-col mb-4">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Estado de tu envío</span>
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Estado</span>
               <span className={`text-sm font-black uppercase mt-1 ${
                 o.status === OrderStatus.PENDING ? 'text-orange-600' :
                 o.status === OrderStatus.COMPLETED ? 'text-emerald-600' : 'text-indigo-600'
