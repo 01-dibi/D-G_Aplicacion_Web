@@ -1,12 +1,10 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
   ChevronRight, Menu, X, ArrowLeft, Loader2, 
-  History, Trash2, PlusSquare, Box, Share2, MapPin, 
-  Plus, Check, LogOut, Settings, MessageCircle, Phone, Navigation,
-  Activity, Layers, Package, User, Info, Lock, AlertTriangle, RefreshCcw,
-  FileDown, FileSpreadsheet, FileJson
+  History, Trash2, PlusSquare, MapPin, 
+  Plus, Check, LogOut, MessageCircle, 
+  Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types';
 import { supabase } from './supabaseClient';
@@ -39,17 +37,19 @@ export default function App() {
 
   const fetchOrders = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .order('createdAt', { ascending: false });
-    
-    if (error) {
-      console.error("Error cargando órdenes:", error);
-    } else {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('createdAt', { ascending: false });
+      
+      if (error) throw error;
       setOrders(data || []);
+    } catch (error) {
+      console.error("Error cargando órdenes:", error);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   useEffect(() => {
@@ -85,7 +85,7 @@ export default function App() {
     if (view === 'PENDING') base = orders.filter(o => o.status === OrderStatus.PENDING);
     if (view === 'COMPLETED') base = orders.filter(o => o.status === OrderStatus.COMPLETED);
     if (view === 'DISPATCHED') base = orders.filter(o => o.status === OrderStatus.DISPATCHED);
-    if (view === 'ALL') base = orders.filter(o => o.status === OrderStatus.ARCHIVED || o.status === OrderStatus.DISPATCHED);
+    if (view === 'ALL') base = orders.filter(o => o.status === OrderStatus.ARCHIVED);
     
     const lowSearch = searchTerm.toLowerCase();
     return base.filter(o => 
@@ -99,15 +99,18 @@ export default function App() {
     const { error } = await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
     if (error) alert("Error al actualizar");
     setSelectedOrder(updatedOrder);
+    fetchOrders();
   };
 
   const handleBatchUpdate = async (customerNumber: string, nextStatus: OrderStatus) => {
     await supabase.from('orders').update({ status: nextStatus }).eq('customerNumber', customerNumber).not('status', 'eq', OrderStatus.ARCHIVED);
+    fetchOrders();
   };
 
   const handleDeleteOrder = async (id: string) => {
     await supabase.from('orders').delete().eq('id', id);
     setSelectedOrder(null);
+    fetchOrders();
   };
 
   const handleAddOrder = async (newOrder: Partial<Order>) => {
@@ -117,6 +120,7 @@ export default function App() {
     } else {
       setIsNewOrderModalOpen(false);
       setView('PENDING');
+      fetchOrders();
     }
   };
 
@@ -124,7 +128,7 @@ export default function App() {
   if (!currentUser) return <LoginModal onLogin={u => setCurrentUser(u)} onClientAccess={() => setIsCustomerMode(true)} />;
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-24 font-sans relative">
+    <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-24 font-sans relative overflow-x-hidden">
       
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200]">
@@ -147,7 +151,7 @@ export default function App() {
               <SidebarItem icon={<Activity size={20}/>} label="Seguimiento de Pedido" active={view === 'TRACKING'} onClick={() => { setView('TRACKING'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<History size={20}/>} label="Historial de Archivo" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
             </nav>
-            <div className="p-4 border-t">
+            <div className="p-4 border-t mt-auto">
                <SidebarItem icon={<LogOut size={20}/>} label="Salir" onClick={() => setCurrentUser(null)} danger />
             </div>
           </div>
@@ -193,7 +197,7 @@ export default function App() {
           </div>
         )}
 
-        {(view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
+        {!isLoading && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <button onClick={() => setView('DASHBOARD')} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest"><ArrowLeft size={14}/> Dashboard</button>
@@ -210,9 +214,11 @@ export default function App() {
               />
             </div>
             <div className="space-y-3">
-              {filteredOrders.map(order => (
+              {filteredOrders.length > 0 ? filteredOrders.map(order => (
                 <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} allOrders={orders} />
-              ))}
+              )) : (
+                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase">No hay pedidos registrados</p>
+              )}
             </div>
           </div>
         )}
@@ -254,7 +260,7 @@ export default function App() {
   );
 }
 
-// Subcomponentes refactorizados...
+// COMPONENTES DE APOYO
 
 function NewOrderForm({ onAdd, onBack, reviewer }: any) {
   const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
@@ -296,7 +302,6 @@ function NewOrderForm({ onAdd, onBack, reviewer }: any) {
   );
 }
 
-// Otros componentes...
 function SidebarItem({ icon, label, active, onClick, danger }: any) {
   return (
     <button onClick={onClick} className={`w-full flex items-center gap-4 p-4 rounded-2xl font-bold text-sm transition-all ${active ? 'bg-teal-50 text-teal-600' : danger ? 'text-red-500 hover:bg-red-50' : 'text-slate-600 hover:bg-slate-50'}`}>
@@ -309,8 +314,8 @@ function SidebarItem({ icon, label, active, onClick, danger }: any) {
 function StatCard({ count, label, color, icon, onClick }: any) {
   return (
     <button onClick={onClick} className={`${color} p-6 rounded-[32px] text-white flex flex-col justify-between h-40 text-left shadow-lg active:scale-95 transition-all overflow-hidden relative`}>
-      <div className="absolute -right-4 -top-4 opacity-10">{React.cloneElement(icon, { size: 90 })}</div>
-      <div className="bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center backdrop-blur-md">{React.cloneElement(icon, { size: 16 })}</div>
+      <div className="absolute -right-4 -top-4 opacity-10">{React.cloneElement(icon as React.ReactElement, { size: 90 })}</div>
+      <div className="bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center backdrop-blur-md">{React.cloneElement(icon as React.ReactElement, { size: 16 })}</div>
       <div>
         <h3 className="text-3xl font-black">{count}</h3>
         <p className="text-[9px] font-black uppercase tracking-widest opacity-80">{label}</p>
@@ -319,7 +324,6 @@ function StatCard({ count, label, color, icon, onClick }: any) {
   );
 }
 
-// Fix: Kept this implementation and removed the duplicate that was at the end of the file
 function NavBtn({ icon, active, onClick }: any) {
   return (
     <button onClick={onClick} className={`p-4 rounded-2xl transition-all ${active ? 'text-teal-500 bg-teal-50' : 'text-slate-300'}`}>
@@ -340,13 +344,17 @@ function Input({ label, value, onChange, placeholder }: any) {
 function OrderCard({ order, onClick, allOrders }: any) {
   const isGrouped = allOrders.filter((o:any) => o.customerNumber === order.customerNumber && o.status !== OrderStatus.ARCHIVED).length > 1;
   return (
-    <div onClick={onClick} className={`bg-white p-6 rounded-[32px] border-2 shadow-sm relative overflow-hidden ${isGrouped ? 'border-teal-500/20' : 'border-slate-100'}`}>
+    <div onClick={onClick} className={`bg-white p-6 rounded-[32px] border-2 shadow-sm relative overflow-hidden cursor-pointer ${isGrouped ? 'border-teal-500/20' : 'border-slate-100'}`}>
       <div className="flex justify-between items-start mb-3">
         <div className="flex flex-col">
           <span className="text-[7px] font-black text-slate-400 uppercase leading-none mb-1">ORDEN</span>
           <span className="text-[10px] font-black text-teal-600">#{order.orderNumber}</span>
         </div>
-        <span className="text-[8px] font-black px-2 py-1 rounded-lg bg-slate-100 text-slate-600 uppercase">{order.status}</span>
+        <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase ${
+          order.status === OrderStatus.PENDING ? 'bg-orange-100 text-orange-600' :
+          order.status === OrderStatus.COMPLETED ? 'bg-emerald-100 text-emerald-600' :
+          order.status === OrderStatus.DISPATCHED ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
+        }`}>{order.status}</span>
       </div>
       <h3 className="font-black text-slate-800 text-sm mb-1">{order.customerName}</h3>
       <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400">
@@ -357,33 +365,46 @@ function OrderCard({ order, onClick, allOrders }: any) {
 }
 
 function OrderDetailsModal({ order, onClose, onUpdate, allOrders, onBatchUpdate, onDelete }: any) {
+  const [tab, setTab] = useState<'log' | 'info'>('log');
+  
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[700] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl relative">
-        <button onClick={onClose} className="absolute top-8 right-8 text-slate-400"><X/></button>
-        <h2 className="text-2xl font-black mb-6">{order.customerName}</h2>
+      <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl relative animate-in zoom-in duration-200">
+        <button onClick={onClose} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors"><X/></button>
+        <div className="mb-6">
+          <h2 className="text-2xl font-black text-slate-800 leading-tight">{order.customerName}</h2>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">#{order.orderNumber} - {order.locality}</p>
+        </div>
+
         <div className="space-y-4 mb-8">
-          <div className="flex justify-between p-4 bg-slate-50 rounded-2xl">
-             <span className="text-xs font-black text-slate-400">ESTADO ACTUAL</span>
-             <span className="text-xs font-black text-teal-600">{order.status}</span>
+          <div className="flex justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+             <span className="text-[10px] font-black text-slate-400 uppercase">Estado</span>
+             <span className="text-[10px] font-black text-teal-600 uppercase">{order.status}</span>
           </div>
-          <div className="p-4 bg-slate-50 rounded-2xl">
-             <span className="text-[9px] font-black text-slate-400 uppercase">Localidad</span>
-             <p className="text-sm font-bold text-slate-800">{order.locality}</p>
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+             <span className="text-[9px] font-black text-slate-400 uppercase">Instrucciones / Notas</span>
+             <p className="text-xs font-bold text-slate-800 mt-1">{order.notes || "Sin notas adicionales"}</p>
           </div>
         </div>
-        <button 
-          onClick={() => {
-            const statuses = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
-            const next = statuses[statuses.indexOf(order.status) + 1];
-            if(next) onUpdate({...order, status: next});
-            onClose();
-          }}
-          className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs"
-        >
-          Avanzar a la siguiente etapa
-        </button>
-        <button onClick={() => { if(confirm("¿Eliminar?")) onDelete(order.id); }} className="w-full py-4 text-[10px] font-black text-red-500 uppercase mt-2">Eliminar pedido</button>
+
+        <div className="space-y-3">
+          <button 
+            onClick={() => {
+              const statuses = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
+              const next = statuses[statuses.indexOf(order.status) + 1];
+              if(next) onUpdate({...order, status: next});
+              onClose();
+            }}
+            className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2"
+          >
+            Avanzar Etapa <ChevronRight size={16}/>
+          </button>
+          
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick={() => { if(confirm("¿Eliminar pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
+            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase">Cerrar</button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -391,12 +412,25 @@ function OrderDetailsModal({ order, onClose, onUpdate, allOrders, onBatchUpdate,
 
 function TrackingInternalView({ orders, onBack, onSelectOrder }: any) {
   const [q, setQ] = useState('');
-  const results = orders.filter((o:any) => o.customerName.toLowerCase().includes(q.toLowerCase()));
+  const results = orders.filter((o:any) => 
+    o.customerName.toLowerCase().includes(q.toLowerCase()) || 
+    o.orderNumber.includes(q)
+  );
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-in slide-in-from-right duration-300">
       <button onClick={onBack} className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest"><ArrowLeft size={14}/> Atrás</button>
-      <input className="w-full bg-white border-2 border-slate-100 p-4 rounded-3xl text-sm font-bold" placeholder="Buscar..." value={q} onChange={e=>setQ(e.target.value)} />
-      {results.map((o:any) => <OrderCard key={o.id} order={o} onClick={() => onSelectOrder(o)} allOrders={orders} />)}
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+        <input 
+          className="w-full bg-white border-2 border-slate-100 p-4 pl-12 rounded-3xl text-sm font-bold outline-none focus:border-teal-500" 
+          placeholder="Buscar cliente o Nº..." 
+          value={q} 
+          onChange={e=>setQ(e.target.value)} 
+        />
+      </div>
+      <div className="space-y-3">
+        {results.map((o:any) => <OrderCard key={o.id} order={o} onClick={() => onSelectOrder(o)} allOrders={orders} />)}
+      </div>
     </div>
   );
 }
@@ -405,11 +439,13 @@ function LoginModal({ onLogin, onClientAccess }: any) {
   const [n, setN] = useState('');
   return (
     <div className="fixed inset-0 bg-slate-950 flex items-center justify-center p-8 z-[1000]">
-      <div className="bg-white w-full max-sm rounded-[48px] p-10 text-center space-y-8">
+      <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl">
         <h1 className="text-5xl font-black italic">D<span className="text-orange-500">&</span>G</h1>
-        <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none" placeholder="Operador" value={n} onChange={e=>setN(e.target.value)} />
-        <button onClick={()=>onLogin({name:n||'INVITADO'})} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase shadow-xl">Entrar</button>
-        <button onClick={onClientAccess} className="text-[10px] font-black text-teal-600 uppercase w-full">Seguimiento Clientes</button>
+        <div className="space-y-4">
+          <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all" placeholder="Nombre Operador" value={n} onChange={e=>setN(e.target.value)} />
+          <button onClick={()=>onLogin({name:n||'INVITADO'})} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase shadow-xl tracking-widest text-xs">Entrar al Sistema</button>
+        </div>
+        <button onClick={onClientAccess} className="text-[10px] font-black text-teal-600 uppercase w-full tracking-widest hover:underline transition-all">Seguimiento de Clientes</button>
       </div>
     </div>
   );
@@ -417,18 +453,39 @@ function LoginModal({ onLogin, onClientAccess }: any) {
 
 function CustomerPortal({ onBack, orders }: any) {
   const [s, setS] = useState('');
-  const r = orders.filter((o:any) => o.customerName.toLowerCase().includes(s.toLowerCase()));
+  const r = orders.filter((o:any) => (o.customerName.toLowerCase().includes(s.toLowerCase()) || o.customerNumber.includes(s)) && o.status !== OrderStatus.ARCHIVED);
+  
   return (
-    <div className="p-6 space-y-6">
-      <button onClick={onBack} className="p-3 bg-white border rounded-2xl"><ArrowLeft/></button>
-      <h2 className="text-2xl font-black">Tu Pedido</h2>
-      <input className="w-full bg-white p-5 rounded-3xl border-2" placeholder="Nombre..." value={s} onChange={e=>setS(e.target.value)} />
-      {s.length > 2 && r.map((o:any) => (
-        <div key={o.id} className="bg-white p-8 rounded-[40px] shadow-lg">
-          <h4 className="font-black text-xl mb-4">{o.customerName}</h4>
-          <span className="text-xs font-black text-teal-600 uppercase">{o.status}</span>
-        </div>
-      ))}
+    <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50">
+      <header className="flex items-center gap-4">
+        <button onClick={onBack} className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm"><ArrowLeft/></button>
+        <h2 className="text-2xl font-black italic">Seguimiento</h2>
+      </header>
+      <div className="bg-white p-6 rounded-[32px] border-2 border-slate-100 space-y-4 shadow-sm">
+        <h3 className="font-black text-lg">Consulta tu pedido</h3>
+        <input className="w-full bg-slate-50 p-5 rounded-2xl border-2 border-transparent focus:border-teal-500 outline-none font-bold" placeholder="Tu nombre o Nº de cliente..." value={s} onChange={e=>setS(e.target.value)} />
+      </div>
+      <div className="space-y-4">
+        {s.length > 2 && r.map((o:any) => (
+          <div key={o.id} className="bg-white p-8 rounded-[40px] shadow-lg border-2 border-slate-50 animate-in fade-in slide-in-from-bottom duration-300">
+            <h4 className="font-black text-xl mb-2 text-slate-800 uppercase italic tracking-tighter">{o.customerName}</h4>
+            <div className="flex flex-col mb-4">
+              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Estado de tu envío</span>
+              <span className={`text-sm font-black uppercase mt-1 ${
+                o.status === OrderStatus.PENDING ? 'text-orange-600' :
+                o.status === OrderStatus.COMPLETED ? 'text-emerald-600' : 'text-indigo-600'
+              }`}>{o.status}</span>
+            </div>
+            <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-400">Orden: #{o.orderNumber}</span>
+              <button className="text-teal-600 font-black text-[10px] uppercase tracking-widest">Ver Detalles</button>
+            </div>
+          </div>
+        ))}
+        {s.length > 2 && r.length === 0 && (
+          <p className="text-center text-slate-400 font-bold text-xs py-10">No se encontró información para tu búsqueda</p>
+        )}
+      </div>
     </div>
   );
 }
