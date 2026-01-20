@@ -9,12 +9,6 @@ import {
 import { Order, OrderStatus, View } from './types';
 import { supabase } from './supabaseClient';
 
-const DEPOSITS = ['E', 'F', 'D1', 'D2', 'A1', 'GENERAL'];
-const PACKAGE_TYPES = ['CAJA', 'BOLSA', 'BULTO', 'PACK'];
-const DELIVERY_CATEGORIES = ['VIAJANTES', 'VENDEDORES', 'TRANSPORTE', 'COMISIONISTA', 'RETIRO PERSONAL', 'EXPRESO'];
-const VIAJANTES_LIST = ['MATÍAS', 'NICOLÁS'];
-const VENDEDORES_LIST = ['MAURO', 'GUSTAVO'];
-
 export default function App() {
   const [isCustomerMode, setIsCustomerMode] = useState(false);
   const [view, setView] = useState<View>('DASHBOARD');
@@ -97,30 +91,37 @@ export default function App() {
 
   const handleUpdateOrder = async (updatedOrder: Order) => {
     const { error } = await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
-    if (error) alert("Error al actualizar");
+    if (error) alert("Error al actualizar: " + error.message);
     setSelectedOrder(updatedOrder);
     fetchOrders();
   };
 
-  const handleBatchUpdate = async (customerNumber: string, nextStatus: OrderStatus) => {
-    await supabase.from('orders').update({ status: nextStatus }).eq('customerNumber', customerNumber).not('status', 'eq', OrderStatus.ARCHIVED);
-    fetchOrders();
-  };
-
   const handleDeleteOrder = async (id: string) => {
-    await supabase.from('orders').delete().eq('id', id);
+    const { error } = await supabase.from('orders').delete().eq('id', id);
+    if (error) alert("Error al eliminar: " + error.message);
     setSelectedOrder(null);
     fetchOrders();
   };
 
-  const handleAddOrder = async (newOrder: Partial<Order>) => {
-    const { error } = await supabase.from('orders').insert([newOrder]);
-    if (error) {
-      alert("Error al guardar pedido");
-    } else {
-      setIsNewOrderModalOpen(false);
-      setView('PENDING');
-      fetchOrders();
+  const handleAddOrder = async (newOrderData: Partial<Order>) => {
+    try {
+      const newOrder = {
+        id: crypto.randomUUID(),
+        ...newOrderData,
+      };
+      
+      const { error } = await supabase.from('orders').insert([newOrder]);
+      
+      if (error) {
+        console.error("Supabase error:", error);
+        alert(`Error al guardar: ${error.message}. Asegúrese de que la tabla 'orders' exista en Supabase.`);
+      } else {
+        setIsNewOrderModalOpen(false);
+        setView('PENDING');
+        await fetchOrders();
+      }
+    } catch (err: any) {
+      alert("Error inesperado: " + err.message);
     }
   };
 
@@ -245,7 +246,6 @@ export default function App() {
           onClose={() => setSelectedOrder(null)} 
           onUpdate={handleUpdateOrder}
           allOrders={orders}
-          onBatchUpdate={handleBatchUpdate}
           onDelete={handleDeleteOrder}
         />
       )}
@@ -260,12 +260,14 @@ export default function App() {
   );
 }
 
-// COMPONENTES DE APOYO
-
 function NewOrderForm({ onAdd, onBack, reviewer }: any) {
   const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
+  
   const submit = () => {
-    if(!form.orderNumber || !form.nro || !form.name) return alert("Faltan datos obligatorios");
+    if(!form.orderNumber || !form.nro || !form.name) {
+      return alert("Complete los campos obligatorios: Nº Orden, Nº Cliente y Razón Social");
+    }
+    
     onAdd({
       orderNumber: form.orderNumber.toUpperCase(),
       customerNumber: form.nro,
@@ -364,9 +366,7 @@ function OrderCard({ order, onClick, allOrders }: any) {
   );
 }
 
-function OrderDetailsModal({ order, onClose, onUpdate, allOrders, onBatchUpdate, onDelete }: any) {
-  const [tab, setTab] = useState<'log' | 'info'>('log');
-  
+function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[700] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl relative animate-in zoom-in duration-200">
@@ -391,9 +391,11 @@ function OrderDetailsModal({ order, onClose, onUpdate, allOrders, onBatchUpdate,
           <button 
             onClick={() => {
               const statuses = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
-              const next = statuses[statuses.indexOf(order.status) + 1];
-              if(next) onUpdate({...order, status: next});
-              onClose();
+              const nextIndex = statuses.indexOf(order.status) + 1;
+              if (nextIndex < statuses.length) {
+                onUpdate({...order, status: statuses[nextIndex]});
+                onClose();
+              }
             }}
             className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2"
           >
@@ -476,15 +478,8 @@ function CustomerPortal({ onBack, orders }: any) {
                 o.status === OrderStatus.COMPLETED ? 'text-emerald-600' : 'text-indigo-600'
               }`}>{o.status}</span>
             </div>
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400">Orden: #{o.orderNumber}</span>
-              <button className="text-teal-600 font-black text-[10px] uppercase tracking-widest">Ver Detalles</button>
-            </div>
           </div>
         ))}
-        {s.length > 2 && r.length === 0 && (
-          <p className="text-center text-slate-400 font-bold text-xs py-10">No se encontró información para tu búsqueda</p>
-        )}
       </div>
     </div>
   );
