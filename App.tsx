@@ -5,10 +5,10 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff
+  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types';
-import { supabase, isConfigValid } from './supabaseClient';
+import { supabase, connectionStatus } from './supabaseClient';
 
 export default function App() {
   const [isCustomerMode, setIsCustomerMode] = useState(false);
@@ -67,17 +67,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchOrders();
-    const channels = supabase.channel('orders-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-        fetchOrders();
-      })
-      .subscribe();
-      
-    return () => {
-      supabase.removeChannel(channels);
-    };
-  }, []);
+    if (currentUser && connectionStatus.hasKey) {
+      fetchOrders();
+      const channels = supabase.channel('orders-realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+          fetchOrders();
+        })
+        .subscribe();
+      return () => { supabase.removeChannel(channels); };
+    }
+  }, [currentUser]);
 
   useEffect(() => {
     if (currentUser) {
@@ -128,8 +127,8 @@ export default function App() {
   };
 
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
-    if (!isConfigValid) {
-      return alert("❌ ERROR CRÍTICO: No se detectó la clave de Supabase. Revisa las variables de entorno VITE_SUPABASE_ANON_KEY.");
+    if (connectionStatus.isPlaceholder) {
+      return alert("❌ ERROR: No se puede guardar. Falta configurar VITE_SUPABASE_ANON_KEY en Vercel.");
     }
 
     setIsSaving(true);
@@ -146,20 +145,15 @@ export default function App() {
       };
 
       const { error } = await supabase.from('orders').insert([payload]);
-
       if (error) throw error;
 
       setIsNewOrderModalOpen(false);
       setView('PENDING');
       await fetchOrders();
-      alert("✅ Pedido confirmado y guardado correctamente.");
+      alert("✅ Pedido guardado correctamente.");
     } catch (err: any) {
-      console.error("Save error detail:", err);
-      const msg = err.code === '42P01' ? "La tabla 'orders' no existe." : 
-                  err.code === 'PGRST116' ? "Permisos insuficientes (RLS)." :
-                  err.message;
-      alert(`❌ ERROR AL GUARDAR: ${msg}`);
-      setDbError({ message: msg, code: err.code });
+      console.error("Add Order error:", err);
+      alert(`❌ ERROR AL GUARDAR: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
@@ -204,10 +198,10 @@ export default function App() {
         <div className="flex flex-col items-center">
           <h1 className="text-lg font-black tracking-tighter uppercase italic leading-none">D&G <span className="text-orange-500">Logistics</span></h1>
           <div className="flex items-center gap-1 mt-1">
-            {isConfigValid ? (
-              <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest"><Wifi size={8}/> Nube Conectada</span>
+            {!connectionStatus.isPlaceholder ? (
+              <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest"><Wifi size={8}/> ONLINE</span>
             ) : (
-              <span className="flex items-center gap-1 text-[7px] font-black text-red-400 uppercase tracking-widest"><WifiOff size={8}/> Sin Conexión</span>
+              <span className="flex items-center gap-1 text-[7px] font-black text-red-400 uppercase tracking-widest"><WifiOff size={8}/> OFFLINE</span>
             )}
           </div>
         </div>
@@ -215,15 +209,14 @@ export default function App() {
       </header>
 
       <main className="p-5 space-y-6">
-        {!isConfigValid && (
-          <div className="bg-orange-50 border-2 border-orange-200 p-6 rounded-[32px] space-y-3 animate-pulse">
+        {connectionStatus.isPlaceholder && (
+          <div className="bg-orange-50 border-2 border-orange-200 p-6 rounded-[32px] space-y-3">
             <div className="flex items-center gap-3 text-orange-600">
               <ShieldAlert size={24} />
-              <h4 className="font-black text-sm uppercase">Falta Configuración</h4>
+              <h4 className="font-black text-sm uppercase">Sin Conexión Real</h4>
             </div>
             <p className="text-[10px] text-orange-700 font-bold leading-relaxed">
-              La App no puede guardar datos porque falta la clave secreta de Supabase. 
-              Agrégala como variable de entorno <b>VITE_SUPABASE_ANON_KEY</b>.
+              La App está en modo demostración. Para guardar datos reales, configura <b>VITE_SUPABASE_ANON_KEY</b> en tu panel de Vercel.
             </p>
           </div>
         )}
@@ -233,13 +226,13 @@ export default function App() {
             <div className="flex items-start gap-4">
               <ServerCrash className="text-red-500 shrink-0" size={24} />
               <div>
-                <h4 className="font-black text-red-800 text-sm uppercase">Fallo en Base de Datos</h4>
+                <h4 className="font-black text-red-800 text-sm uppercase">Error de DB</h4>
                 <p className="text-[10px] text-red-600 font-bold leading-relaxed">{dbError.message}</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={fetchOrders} className="bg-red-500 text-white py-3 rounded-2xl text-[9px] font-black uppercase">Reintentar</button>
-              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2"><Terminal size={12}/> Reparar DB</button>
+              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2"><Terminal size={12}/> Reparar</button>
             </div>
           </div>
         )}
@@ -249,10 +242,9 @@ export default function App() {
             <button onClick={() => setShowSqlHelp(false)} className="absolute top-6 right-6 text-white/50"><X size={32}/></button>
             <div className="text-center text-white space-y-2">
               <h2 className="text-2xl font-black italic">Reparar Estructura</h2>
-              <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest leading-relaxed">Usa este código si recibes errores de "column not found" o permisos.</p>
+              <p className="text-[10px] text-white/60 font-bold uppercase tracking-widest leading-relaxed">Usa este código si recibes errores de columna o permisos.</p>
             </div>
             <div className="w-full bg-slate-800 p-5 rounded-[32px] font-mono text-[9px] text-teal-400 border-2 border-teal-500/30 overflow-x-auto shadow-2xl relative">
-               <div className="absolute top-4 right-4 text-[7px] bg-teal-500/10 text-teal-500 px-2 py-1 rounded">SQL</div>
               <pre>{`DROP TABLE IF EXISTS orders;
 CREATE TABLE orders (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -267,16 +259,16 @@ CREATE TABLE orders (
   created_at timestamp with time zone DEFAULT now()
 );
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre>
+CREATE POLICY "Acceso Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre>
             </div>
             <button 
               onClick={() => {
-                navigator.clipboard.writeText(`DROP TABLE IF EXISTS orders; CREATE TABLE orders ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, order_number text NOT NULL, customer_number text, customer_name text NOT NULL, locality text DEFAULT 'GENERAL', status text DEFAULT 'PENDIENTE', notes text, source text DEFAULT 'Manual', reviewer text, created_at timestamp with time zone DEFAULT now() ); ALTER TABLE orders ENABLE ROW LEVEL SECURITY; CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`);
-                alert("Copiado. Pégalo en SQL Editor y presiona RUN. Si sale 'Success. No rows returned' es que ya quedó bien.");
+                navigator.clipboard.writeText(`DROP TABLE IF EXISTS orders; CREATE TABLE orders ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, order_number text NOT NULL, customer_number text, customer_name text NOT NULL, locality text DEFAULT 'GENERAL', status text DEFAULT 'PENDIENTE', notes text, source text DEFAULT 'Manual', reviewer text, created_at timestamp with time zone DEFAULT now() ); ALTER TABLE orders ENABLE ROW LEVEL SECURITY; CREATE POLICY "Acceso Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`);
+                alert("Copiado. Pégalo en SQL Editor y dale RUN.");
               }}
-              className="w-full bg-teal-500 text-slate-900 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2 shadow-xl"
+              className="w-full bg-teal-500 text-slate-900 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2"
             >
-              <Copy size={16}/> Copiar SQL para Reparar
+              <Copy size={16}/> Copiar SQL
             </button>
           </div>
         )}
@@ -284,7 +276,7 @@ CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre
         {(isLoading || isSaving) && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Validando con Servidor...' : 'Sincronizando...'}</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Cargando...</p>
           </div>
         )}
 
@@ -299,15 +291,14 @@ CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre
             
             <button 
               onClick={() => setIsNewOrderModalOpen(true)}
-              disabled={!isConfigValid}
-              className={`w-full p-6 rounded-[32px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all ${!isConfigValid ? 'bg-slate-200 opacity-50' : 'bg-slate-900 text-white'}`}
+              className="w-full bg-slate-900 text-white p-6 rounded-[32px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all"
             >
               <div className="w-12 h-12 bg-white/10 text-orange-500 rounded-2xl flex items-center justify-center">
                 <PlusSquare size={24} />
               </div>
               <div className="text-left">
                 <h4 className="font-black uppercase tracking-tighter text-sm">CARGA DE ENVÍO</h4>
-                <p className="text-[10px] font-bold opacity-60">Nuevo pedido manual</p>
+                <p className="text-[10px] font-bold opacity-60">Nuevo registro manual</p>
               </div>
               <ChevronRight className="ml-auto opacity-50" />
             </button>
@@ -325,7 +316,7 @@ CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre
               <input 
                 type="text" 
                 placeholder="Buscar cliente..." 
-                className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none focus:border-teal-500"
+                className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -334,13 +325,11 @@ CREATE POLICY "Publico" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre
               {filteredOrders.length > 0 ? filteredOrders.map(order => (
                 <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} allOrders={orders} />
               )) : (
-                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase tracking-widest">Sin registros encontrados</p>
+                <p className="text-center py-10 text-slate-400 text-xs font-bold uppercase tracking-widest">Sin registros</p>
               )}
             </div>
           </div>
         )}
-
-        {view === 'TRACKING' && <TrackingInternalView orders={orders} onBack={() => setView('DASHBOARD')} onSelectOrder={setSelectedOrder} />}
       </main>
 
       {isNewOrderModalOpen && (
@@ -380,10 +369,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
   const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
   
   const submit = () => {
-    if(!form.orderNumber || !form.name) {
-      return alert("Complete los campos: Nº Orden y Razón Social");
-    }
-    
+    if(!form.orderNumber || !form.name) return alert("Falta Nº Orden o Cliente");
     onAdd({
       orderNumber: form.orderNumber.toUpperCase(),
       customerNumber: form.nro,
@@ -400,7 +386,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800">Carga de Envío</h2>
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Nuevo pedido logística</p>
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Confirmación de ingreso</p>
       </div>
       <div className="space-y-4">
         <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
@@ -417,9 +403,9 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
       <button 
         disabled={isSaving}
         onClick={submit} 
-        className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+        className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2"
       >
-        {isSaving ? <><Loader2 className="animate-spin" size={16}/> CONFIRMANDO...</> : 'CONFIRMAR INGRESO'}
+        {isSaving ? <Loader2 className="animate-spin" size={16}/> : 'CONFIRMAR INGRESO'}
       </button>
     </div>
   );
@@ -499,7 +485,7 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
 
         <div className="space-y-4 mb-8">
           <div className="flex justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <span className="text-[10px] font-black text-slate-400 uppercase">Estado Actual</span>
+             <span className="text-[10px] font-black text-slate-400 uppercase">Estado</span>
              <span className="text-[10px] font-black text-teal-600 uppercase">{order.status}</span>
           </div>
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
@@ -521,11 +507,11 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
             }}
             className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2"
           >
-            Siguiente Etapa <ChevronRight size={16}/>
+            Siguiente Paso <ChevronRight size={16}/>
           </button>
           
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => { if(confirm("¿Eliminar este pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
+            <button onClick={() => { if(confirm("¿Eliminar?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
             <button onClick={onClose} className="py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase">Cerrar</button>
           </div>
         </div>
@@ -534,42 +520,45 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
   );
 }
 
-function TrackingInternalView({ orders, onBack, onSelectOrder }: any) {
-  const [q, setQ] = useState('');
-  const results = orders.filter((o:any) => 
-    (o.customerName?.toLowerCase() || '').includes(q.toLowerCase()) || 
-    (o.orderNumber || '').includes(q)
-  );
-  return (
-    <div className="space-y-4 animate-in slide-in-from-right duration-300">
-      <button onClick={onBack} className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest"><ArrowLeft size={14}/> Atrás</button>
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-        <input 
-          className="w-full bg-white border-2 border-slate-100 p-4 pl-12 rounded-3xl text-sm font-bold outline-none focus:border-teal-500" 
-          placeholder="Buscar comercio o Nº..." 
-          value={q} 
-          onChange={e=>setQ(e.target.value)} 
-        />
-      </div>
-      <div className="space-y-3">
-        {results.map((o:any) => <OrderCard key={o.id} order={o} onClick={() => onSelectOrder(o)} allOrders={orders} />)}
-      </div>
-    </div>
-  );
-}
-
 function LoginModal({ onLogin, onClientAccess }: any) {
   const [n, setN] = useState('');
+  const [showDebug, setShowDebug] = useState(false);
+
   return (
-    <div className="fixed inset-0 bg-slate-950 flex items-center justify-center p-8 z-[1000]">
-      <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl">
+    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 z-[1000]">
+      <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl overflow-hidden relative">
         <h1 className="text-5xl font-black italic">D<span className="text-orange-500">&</span>G</h1>
+        
         <div className="space-y-4">
           <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all" placeholder="Nombre Operador" value={n} onChange={e=>setN(e.target.value)} />
-          <button onClick={()=>onLogin({name:n||'INVITADO'})} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase shadow-xl tracking-widest text-xs">Entrar al Sistema</button>
+          <button onClick={()=>onLogin({name:n||'OPERADOR'})} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase shadow-xl tracking-widest text-xs">Entrar al Sistema</button>
         </div>
-        <button onClick={onClientAccess} className="text-[10px] font-black text-teal-600 uppercase w-full tracking-widest hover:underline transition-all">Seguimiento de Clientes</button>
+        
+        <div className="flex flex-col gap-2">
+           <button onClick={onClientAccess} className="text-[10px] font-black text-teal-600 uppercase w-full tracking-widest hover:underline">Acceso Clientes</button>
+           <button onClick={() => setShowDebug(!showDebug)} className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center justify-center gap-1 mt-4"><Settings size={10}/> Estado Conexión</button>
+        </div>
+
+        {showDebug && (
+          <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left space-y-2 animate-in slide-in-from-bottom">
+            <h5 className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Diagnóstico Vercel/Supabase</h5>
+            <div className="flex justify-between items-center text-[9px] font-bold">
+               <span className="text-slate-400">URL:</span>
+               <span className={connectionStatus.hasUrl ? 'text-emerald-500' : 'text-red-500'}>{connectionStatus.hasUrl ? 'Válida' : 'Falta'}</span>
+            </div>
+            <div className="flex justify-between items-center text-[9px] font-bold">
+               <span className="text-slate-400">Clave Secreta:</span>
+               <span className={connectionStatus.hasKey ? 'text-emerald-500' : 'text-red-500'}>{connectionStatus.hasKey ? 'Detectada' : 'No Detectada'}</span>
+            </div>
+            <div className="flex justify-between items-center text-[9px] font-bold border-t pt-2">
+               <span className="text-slate-400">Proyecto ID:</span>
+               <span className="text-slate-600">{connectionStatus.projectId}</span>
+            </div>
+            {!connectionStatus.hasKey && (
+              <p className="text-[8px] text-red-500 font-black uppercase italic leading-tight mt-2">Agrega VITE_SUPABASE_ANON_KEY en Vercel Settings.</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

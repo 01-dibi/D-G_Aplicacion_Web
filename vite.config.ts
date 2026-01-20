@@ -8,7 +8,10 @@ export default defineConfig({
       API_KEY: JSON.stringify(process.env.API_KEY || ''),
       VITE_SUPABASE_URL: JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
       VITE_SUPABASE_ANON_KEY: JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || '')
-    }
+    },
+    // Fallback para Vite directo
+    'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(process.env.VITE_SUPABASE_URL || ''),
+    'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(process.env.VITE_SUPABASE_ANON_KEY || '')
   },
   build: {
     outDir: 'dist',
