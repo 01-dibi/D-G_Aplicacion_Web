@@ -105,22 +105,34 @@ export default function App() {
 
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
     try {
+      // Asegurar que enviamos un objeto completo para evitar errores de integridad
       const newOrder = {
         id: crypto.randomUUID(),
-        ...newOrderData,
+        orderNumber: newOrderData.orderNumber || '0000',
+        customerNumber: newOrderData.customerNumber || '0',
+        customerName: newOrderData.customerName || 'DESCONOCIDO',
+        locality: newOrderData.locality || 'GENERAL',
+        status: newOrderData.status || OrderStatus.PENDING,
+        notes: newOrderData.notes || '',
+        createdAt: new Date().toISOString(),
+        source: newOrderData.source || 'Manual',
+        reviewer: newOrderData.reviewer || 'Sistema',
+        carrier: '',
+        detailedPackaging: []
       };
       
-      const { error } = await supabase.from('orders').insert([newOrder]);
+      const { error, data } = await supabase.from('orders').insert([newOrder]).select();
       
       if (error) {
-        console.error("Supabase error:", error);
-        alert(`Error al guardar: ${error.message}. Asegúrese de que la tabla 'orders' exista en Supabase.`);
+        console.error("Supabase Error Details:", error);
+        alert(`Error al guardar: ${error.message} (${error.code})`);
       } else {
         setIsNewOrderModalOpen(false);
         setView('PENDING');
         await fetchOrders();
       }
     } catch (err: any) {
+      console.error("Catch error:", err);
       alert("Error inesperado: " + err.message);
     }
   };
@@ -245,7 +257,6 @@ export default function App() {
           order={selectedOrder} 
           onClose={() => setSelectedOrder(null)} 
           onUpdate={handleUpdateOrder}
-          allOrders={orders}
           onDelete={handleDeleteOrder}
         />
       )}

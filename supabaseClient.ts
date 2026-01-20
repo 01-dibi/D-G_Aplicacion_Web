@@ -1,10 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+// Intentar obtener de import.meta.env (Vite) o de process.env (Inyectado por vite.config.ts)
+const getEnv = (name: string) => {
+  return (import.meta as any).env?.[name] || (process.env as any)?.[name] || '';
+};
 
-if (!supabaseUrl || supabaseUrl === 'https://placeholder.supabase.co') {
-  console.warn("Supabase URL no configurada. Las operaciones de base de datos fallarán.");
+const supabaseUrl = getEnv('VITE_SUPABASE_URL');
+const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
+
+if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
+  console.error("CRÍTICO: Supabase URL no detectada. Verifique las Environment Variables en Vercel.");
 }
 
 export const supabase = createClient(
