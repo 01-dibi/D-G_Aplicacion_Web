@@ -1,22 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
 
-// En Vite, las variables deben empezar con VITE_ para ser públicas
-// Pero en el define de vite.config.ts las estamos inyectando en process.env
+// Intentamos obtener las variables de múltiples fuentes para máxima compatibilidad
 const getEnv = (name: string) => {
+  if (typeof window !== 'undefined' && (window as any).process?.env?.[name]) return (window as any).process.env[name];
   // @ts-ignore
-  return import.meta.env?.[name] || (typeof process !== 'undefined' ? process.env?.[name] : '') || '';
+  return import.meta.env?.[name] || '';
 };
 
-const supabaseUrl = getEnv('VITE_SUPABASE_URL');
+// URL detectada por el string de conexión del usuario
+const PROJECT_ID = 'optyltslotiphigvceep';
+const FALLBACK_URL = `https://${PROJECT_ID}.supabase.co`;
+
+const supabaseUrl = getEnv('VITE_SUPABASE_URL') || FALLBACK_URL;
 const supabaseAnonKey = getEnv('VITE_SUPABASE_ANON_KEY');
 
-// Si no hay variables, mostramos un error claro en consola para depuración
-if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
-  console.error("⚠️ CONFIGURACIÓN FALTANTE: No se detectaron las variables de Supabase.");
-  console.log("Asegúrese de configurar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en Vercel.");
+if (!supabaseAnonKey) {
+  console.warn("⚠️ FALTA VITE_SUPABASE_ANON_KEY: La persistencia no funcionará hasta que configures la clave ANON en las variables de entorno.");
 }
 
 export const supabase = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co', 
-  supabaseAnonKey || 'placeholder'
+  supabaseUrl, 
+  supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder'
 );

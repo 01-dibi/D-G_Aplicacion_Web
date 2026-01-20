@@ -5,10 +5,30 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash
+  Database, ServerCrash, Copy, Terminal
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types';
 import { supabase } from './supabaseClient';
+
+/**
+ * SQL PARA REPARAR LA BASE DE DATOS (Copiar y pegar en SQL Editor de Supabase):
+ * 
+ * DROP TABLE IF EXISTS orders;
+ * CREATE TABLE orders (
+ *   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+ *   order_number text NOT NULL,
+ *   customer_number text,
+ *   customer_name text NOT NULL,
+ *   locality text DEFAULT 'GENERAL',
+ *   status text DEFAULT 'PENDIENTE',
+ *   notes text,
+ *   source text DEFAULT 'Manual',
+ *   reviewer text,
+ *   created_at timestamp with time zone DEFAULT now()
+ * );
+ * ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ * CREATE POLICY "Acceso total anonimo" ON orders FOR ALL USING (true) WITH CHECK (true);
+ */
 
 export default function App() {
   const [isCustomerMode, setIsCustomerMode] = useState(false);
@@ -19,7 +39,8 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
-  const [dbError, setDbError] = useState<string | null>(null);
+  const [dbError, setDbError] = useState<{message: string, code?: string} | null>(null);
+  const [showSqlHelp, setShowSqlHelp] = useState(false);
   
   const [currentUser, setCurrentUser] = useState<{ name: string } | null>(() => {
     try {
@@ -39,13 +60,28 @@ export default function App() {
       const { data, error } = await supabase
         .from('orders')
         .select('*')
-        .order('createdAt', { ascending: false });
+        .order('created_at', { ascending: false });
       
       if (error) throw error;
-      setOrders(data || []);
+
+      // Mapear de snake_case (DB) a camelCase (App)
+      const mappedData = (data || []).map((o: any) => ({
+        id: o.id,
+        orderNumber: o.order_number,
+        customerNumber: o.customer_number,
+        customerName: o.customer_name,
+        locality: o.locality,
+        status: o.status as OrderStatus,
+        notes: o.notes,
+        reviewer: o.reviewer,
+        source: o.source,
+        createdAt: o.created_at
+      }));
+
+      setOrders(mappedData);
     } catch (error: any) {
-      console.error("Error cargando órdenes:", error);
-      setDbError(error.message);
+      console.error("Error Supabase:", error);
+      setDbError({ message: error.message, code: error.code });
     } finally {
       setIsLoading(false);
     }
@@ -95,7 +131,11 @@ export default function App() {
   }, [orders, view, searchTerm]);
 
   const handleUpdateOrder = async (updatedOrder: Order) => {
-    const { error } = await supabase.from('orders').update(updatedOrder).eq('id', updatedOrder.id);
+    const { error } = await supabase.from('orders').update({
+      status: updatedOrder.status,
+      notes: updatedOrder.notes
+    }).eq('id', updatedOrder.id);
+    
     if (error) alert("Error al actualizar: " + error.message);
     setSelectedOrder(updatedOrder);
     fetchOrders();
@@ -111,11 +151,11 @@ export default function App() {
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
     setIsSaving(true);
     try {
-      // 1. Intentar con camelCase (estándar del SDK)
-      const payloadCamel = {
-        orderNumber: newOrderData.orderNumber,
-        customerNumber: String(newOrderData.customerNumber),
-        customerName: newOrderData.customerName,
+      // Usar nombres exactos de columnas snake_case para Postgres
+      const payload = {
+        order_number: newOrderData.orderNumber,
+        customer_number: String(newOrderData.customerNumber),
+        customer_name: newOrderData.customerName,
         locality: newOrderData.locality || 'GENERAL',
         status: newOrderData.status || OrderStatus.PENDING,
         notes: newOrderData.notes || '',
@@ -123,43 +163,20 @@ export default function App() {
         source: 'Manual'
       };
 
-      const { error: errorCamel } = await supabase.from('orders').insert([payloadCamel]);
+      const { error } = await supabase.from('orders').insert([payload]);
 
-      if (errorCamel) {
-        console.warn("Fallo inserción camelCase, intentando snake_case...", errorCamel);
-        
-        // 2. Intentar con snake_case (estándar Postgres/Supabase si se creó vía SQL)
-        const payloadSnake = {
-          order_number: newOrderData.orderNumber,
-          customer_number: String(newOrderData.customerNumber),
-          customer_name: newOrderData.customerName,
-          locality: newOrderData.locality || 'GENERAL',
-          status: newOrderData.status || OrderStatus.PENDING,
-          notes: newOrderData.notes || '',
-          reviewer: newOrderData.reviewer || 'Sistema',
-          source: 'Manual'
-        };
-
-        const { error: errorSnake } = await supabase.from('orders').insert([payloadSnake]);
-
-        if (errorSnake) {
-          // Si ambos fallan, el problema es estructural
-          let msg = `Error crítico al guardar: ${errorSnake.message}. `;
-          if (errorSnake.code === '42P01') msg += "La tabla 'orders' NO existe en su Supabase.";
-          else if (errorSnake.code === '42703') msg += "Faltan columnas en la tabla.";
-          else if (errorSnake.code === '42501') msg += "Error de permisos (RLS). Active acceso para anon.";
-          
-          throw new Error(msg);
-        }
+      if (error) {
+        throw new Error(error.message);
       }
 
       setIsNewOrderModalOpen(false);
       setView('PENDING');
       await fetchOrders();
-      alert("✅ Pedido confirmado con éxito");
+      alert("✅ Pedido guardado correctamente.");
     } catch (err: any) {
-      console.error("Error completo:", err);
-      alert("❌ " + err.message);
+      console.error("Save Error:", err);
+      alert(`❌ ERROR AL GUARDAR: ${err.message}\n\nEs probable que la tabla 'orders' no esté creada correctamente.`);
+      setDbError({ message: err.message });
     } finally {
       setIsSaving(false);
     }
@@ -207,20 +224,61 @@ export default function App() {
 
       <main className="p-5 space-y-6">
         {dbError && (
-          <div className="bg-red-50 border-2 border-red-200 p-6 rounded-3xl flex items-start gap-4 animate-in fade-in slide-in-from-top">
-            <ServerCrash className="text-red-500 shrink-0" size={24} />
-            <div className="space-y-2">
-              <h4 className="font-black text-red-800 text-sm uppercase">Error de Conexión</h4>
-              <p className="text-[10px] text-red-600 font-bold leading-relaxed">{dbError}</p>
-              <button onClick={fetchOrders} className="bg-red-500 text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Reintentar</button>
+          <div className="bg-red-50 border-2 border-red-200 p-6 rounded-[32px] space-y-4 animate-in slide-in-from-top">
+            <div className="flex items-start gap-4">
+              <ServerCrash className="text-red-500 shrink-0" size={24} />
+              <div>
+                <h4 className="font-black text-red-800 text-sm uppercase">Error de Base de Datos</h4>
+                <p className="text-[10px] text-red-600 font-bold leading-relaxed">{dbError.message}</p>
+              </div>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={fetchOrders} className="bg-red-500 text-white py-3 rounded-2xl text-[9px] font-black uppercase">Reintentar</button>
+              <button onClick={() => setShowSqlHelp(true)} className="bg-slate-900 text-white py-3 rounded-2xl text-[9px] font-black uppercase flex items-center justify-center gap-2"><Terminal size={12}/> Reparar DB</button>
+            </div>
+          </div>
+        )}
+
+        {showSqlHelp && (
+          <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[1000] p-6 flex flex-col items-center justify-center space-y-6">
+            <button onClick={() => setShowSqlHelp(false)} className="absolute top-6 right-6 text-white/50"><X size={32}/></button>
+            <div className="text-center text-white space-y-2">
+              <h2 className="text-2xl font-black italic">Instrucciones de Reparación</h2>
+              <p className="text-xs text-white/60">Copia este código y pégalo en el <b>SQL Editor</b> de tu Supabase.</p>
+            </div>
+            <div className="w-full bg-slate-800 p-4 rounded-3xl font-mono text-[9px] text-teal-400 border border-teal-500/30 overflow-x-auto">
+              <pre>{`DROP TABLE IF EXISTS orders;
+CREATE TABLE orders (
+  id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+  order_number text NOT NULL,
+  customer_number text,
+  customer_name text NOT NULL,
+  locality text DEFAULT 'GENERAL',
+  status text DEFAULT 'PENDIENTE',
+  notes text,
+  source text DEFAULT 'Manual',
+  reviewer text,
+  created_at timestamp with time zone DEFAULT now()
+);
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`}</pre>
+            </div>
+            <button 
+              onClick={() => {
+                navigator.clipboard.writeText(`DROP TABLE IF EXISTS orders; CREATE TABLE orders ( id uuid DEFAULT gen_random_uuid() PRIMARY KEY, order_number text NOT NULL, customer_number text, customer_name text NOT NULL, locality text DEFAULT 'GENERAL', status text DEFAULT 'PENDIENTE', notes text, source text DEFAULT 'Manual', reviewer text, created_at timestamp with time zone DEFAULT now() ); ALTER TABLE orders ENABLE ROW LEVEL SECURITY; CREATE POLICY "Acceso total" ON orders FOR ALL USING (true) WITH CHECK (true);`);
+                alert("Copiado al portapapeles. Pégalo en Supabase SQL Editor.");
+              }}
+              className="w-full bg-teal-500 text-slate-900 py-5 rounded-3xl font-black uppercase tracking-widest text-xs flex items-center justify-center gap-2"
+            >
+              <Copy size={16}/> Copiar Código SQL
+            </button>
           </div>
         )}
 
         {(isLoading || isSaving) && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Confirmando pedido...' : 'Cargando datos...'}</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Guardando en la nube...' : 'Sincronizando...'}</p>
           </div>
         )}
 
@@ -335,7 +393,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800">Carga de Envío</h2>
-        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Confirmar ingreso a logística</p>
+        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Nuevo pedido manual</p>
       </div>
       <div className="space-y-4">
         <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
@@ -354,7 +412,7 @@ function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
         onClick={submit} 
         className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
       >
-        {isSaving ? <><Loader2 className="animate-spin" size={16}/> GUARDANDO...</> : 'INGRESAR A LOGÍSTICA'}
+        {isSaving ? <><Loader2 className="animate-spin" size={16}/> GUARDANDO...</> : 'CONFIRMAR INGRESO'}
       </button>
     </div>
   );
@@ -460,7 +518,7 @@ function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
           </button>
           
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => { if(confirm("¿Eliminar este pedido definitivamente?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
+            <button onClick={() => { if(confirm("¿Eliminar este pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
             <button onClick={onClose} className="py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase">Cerrar</button>
           </div>
         </div>
