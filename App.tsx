@@ -9,6 +9,26 @@ import {
 import { Order, OrderStatus, View } from './types';
 import { supabase } from './supabaseClient';
 
+/**
+ * NOTA PARA EL USUARIO:
+ * Si el error persiste, ejecute este SQL en el SQL EDITOR de Supabase:
+ * 
+ * CREATE TABLE IF NOT EXISTS orders (
+ *   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+ *   orderNumber text,
+ *   customerNumber text,
+ *   customerName text,
+ *   locality text,
+ *   status text,
+ *   notes text,
+ *   source text,
+ *   reviewer text,
+ *   createdAt timestamp with time zone DEFAULT now()
+ * );
+ * ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+ * CREATE POLICY "Permitir todo a anon" ON orders FOR ALL USING (true) WITH CHECK (true);
+ */
+
 export default function App() {
   const [isCustomerMode, setIsCustomerMode] = useState(false);
   const [view, setView] = useState<View>('DASHBOARD');
@@ -16,6 +36,7 @@ export default function App() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   
   const [currentUser, setCurrentUser] = useState<{ name: string } | null>(() => {
@@ -104,36 +125,52 @@ export default function App() {
   };
 
   const handleAddOrder = async (newOrderData: Partial<Order>) => {
+    setIsSaving(true);
     try {
-      // Asegurar que enviamos un objeto completo para evitar errores de integridad
+      // Intentamos insertar omitiendo el ID para que Supabase lo autogenere
       const newOrder = {
-        id: crypto.randomUUID(),
-        orderNumber: newOrderData.orderNumber || '0000',
-        customerNumber: newOrderData.customerNumber || '0',
-        customerName: newOrderData.customerName || 'DESCONOCIDO',
+        orderNumber: newOrderData.orderNumber,
+        customerNumber: String(newOrderData.customerNumber),
+        customerName: newOrderData.customerName,
         locality: newOrderData.locality || 'GENERAL',
         status: newOrderData.status || OrderStatus.PENDING,
         notes: newOrderData.notes || '',
-        createdAt: new Date().toISOString(),
-        source: newOrderData.source || 'Manual',
         reviewer: newOrderData.reviewer || 'Sistema',
-        carrier: '',
-        detailedPackaging: []
+        source: 'Manual'
       };
       
       const { error, data } = await supabase.from('orders').insert([newOrder]).select();
       
       if (error) {
-        console.error("Supabase Error Details:", error);
-        alert(`Error al guardar: ${error.message} (${error.code})`);
-      } else {
-        setIsNewOrderModalOpen(false);
-        setView('PENDING');
-        await fetchOrders();
+        console.error("Error detallado de Supabase:", error);
+        // Si falla, puede ser porque las columnas están en snake_case en la DB
+        const snakeCaseOrder = {
+          order_number: newOrderData.orderNumber,
+          customer_number: String(newOrderData.customerNumber),
+          customer_name: newOrderData.customerName,
+          locality: newOrderData.locality || 'GENERAL',
+          status: newOrderData.status || OrderStatus.PENDING,
+          notes: newOrderData.notes || '',
+          reviewer: newOrderData.reviewer || 'Sistema',
+          source: 'Manual'
+        };
+        
+        const { error: error2 } = await supabase.from('orders').insert([snakeCaseOrder]);
+        
+        if (error2) {
+          throw new Error(`Error en base de datos: ${error2.message} (Código: ${error2.code}). Verifique que la tabla 'orders' tenga las columnas correctas.`);
+        }
       }
+
+      setIsNewOrderModalOpen(false);
+      setView('PENDING');
+      await fetchOrders();
+      alert("✅ Pedido cargado con éxito en Logística");
     } catch (err: any) {
-      console.error("Catch error:", err);
-      alert("Error inesperado: " + err.message);
+      console.error("Error completo al guardar:", err);
+      alert("❌ " + err.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -178,14 +215,14 @@ export default function App() {
       </header>
 
       <main className="p-5 space-y-6">
-        {isLoading && (
+        {(isLoading || isSaving) && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando...</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">{isSaving ? 'Guardando pedido...' : 'Sincronizando...'}</p>
           </div>
         )}
 
-        {!isLoading && view === 'DASHBOARD' && (
+        {!isLoading && !isSaving && view === 'DASHBOARD' && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <StatCard count={stats.pending} label="Pendientes" color="bg-orange-500" icon={<ClipboardList />} onClick={() => setView('PENDING')} />
@@ -210,7 +247,7 @@ export default function App() {
           </div>
         )}
 
-        {!isLoading && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
+        {!isLoading && !isSaving && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <button onClick={() => setView('DASHBOARD')} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest"><ArrowLeft size={14}/> Dashboard</button>
@@ -247,6 +284,7 @@ export default function App() {
               onAdd={handleAddOrder} 
               onBack={() => setIsNewOrderModalOpen(false)} 
               reviewer={currentUser?.name || 'Sistema'} 
+              isSaving={isSaving}
             />
           </div>
         </div>
@@ -271,7 +309,7 @@ export default function App() {
   );
 }
 
-function NewOrderForm({ onAdd, onBack, reviewer }: any) {
+function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
   const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
   
   const submit = () => {
@@ -286,7 +324,6 @@ function NewOrderForm({ onAdd, onBack, reviewer }: any) {
       locality: form.locality.toUpperCase() || 'GENERAL',
       status: OrderStatus.PENDING,
       notes: form.notes, 
-      createdAt: new Date().toISOString(),
       source: 'Manual',
       reviewer
     });
@@ -310,7 +347,13 @@ function NewOrderForm({ onAdd, onBack, reviewer }: any) {
           <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones especiales..." />
         </div>
       </div>
-      <button onClick={submit} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all">INGRESAR A LOGÍSTICA</button>
+      <button 
+        disabled={isSaving}
+        onClick={submit} 
+        className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+      >
+        {isSaving ? <><Loader2 className="animate-spin" size={16}/> GUARDANDO...</> : 'INGRESAR A LOGÍSTICA'}
+      </button>
     </div>
   );
 }
@@ -452,7 +495,7 @@ function LoginModal({ onLogin, onClientAccess }: any) {
   const [n, setN] = useState('');
   return (
     <div className="fixed inset-0 bg-slate-950 flex items-center justify-center p-8 z-[1000]">
-      <div className="bg-white w-full max-w-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl">
+      <div className="bg-white w-full max-sm rounded-[48px] p-10 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl">
         <h1 className="text-5xl font-black italic">D<span className="text-orange-500">&</span>G</h1>
         <div className="space-y-4">
           <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all" placeholder="Nombre Operador" value={n} onChange={e=>setN(e.target.value)} />
@@ -466,7 +509,7 @@ function LoginModal({ onLogin, onClientAccess }: any) {
 
 function CustomerPortal({ onBack, orders }: any) {
   const [s, setS] = useState('');
-  const r = orders.filter((o:any) => (o.customerName.toLowerCase().includes(s.toLowerCase()) || o.customerNumber.includes(s)) && o.status !== OrderStatus.ARCHIVED);
+  const r = orders.filter((o:any) => (o.customerName?.toLowerCase().includes(s.toLowerCase()) || o.customerNumber?.includes(s)) && o.status !== OrderStatus.ARCHIVED);
   
   return (
     <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50">
