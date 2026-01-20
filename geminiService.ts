@@ -1,16 +1,14 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
-const apiKey = process.env.API_KEY || '';
-
+// Fix: Moved GoogleGenAI initialization inside analyzeOrderText function and used process.env.API_KEY directly to align with SDK guidelines
 export async function analyzeOrderText(text: string) {
-  if (!apiKey) {
+  if (!process.env.API_KEY) {
     console.error("Falta API_KEY");
     return null;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Analiza el siguiente texto de un pedido. EXTRAE ÚNICAMENTE el nombre del cliente y la localidad. 

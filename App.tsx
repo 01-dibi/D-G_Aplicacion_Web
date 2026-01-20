@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
@@ -9,6 +8,7 @@ import {
   FileDown, FileSpreadsheet, FileJson
 } from 'lucide-react';
 import { Order, OrderStatus, View, PackagingEntry } from './types.ts';
+import { supabase } from './supabaseClient.ts';
 
 const DEPOSITS = ['E', 'F', 'D1', 'D2', 'A1', 'GENERAL'];
 const PACKAGE_TYPES = ['CAJA', 'BOLSA', 'BULTO', 'PACK'];
@@ -23,30 +23,48 @@ export default function App() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   
   const [currentUser, setCurrentUser] = useState<{ name: string } | null>(() => {
     try {
       const saved = localStorage.getItem('dg_user');
       return saved ? JSON.parse(saved) : null;
     } catch (e) {
-      console.error("Error al cargar usuario:", e);
       return null;
     }
   });
 
-  const [orders, setOrders] = useState<Order[]>(() => {
-    try {
-      const saved = localStorage.getItem('dg_orders');
-      return saved ? JSON.parse(saved) : INITIAL_ORDERS;
-    } catch (e) {
-      console.error("Error al cargar pedidos:", e);
-      return INITIAL_ORDERS;
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  // Función para cargar órdenes desde Supabase
+  const fetchOrders = async () => {
+    setIsLoading(true);
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('createdAt', { ascending: false });
+    
+    if (error) {
+      console.error("Error cargando órdenes:", error);
+    } else {
+      setOrders(data || []);
     }
-  });
+    setIsLoading(false);
+  };
 
   useEffect(() => {
-    localStorage.setItem('dg_orders', JSON.stringify(orders));
-  }, [orders]);
+    fetchOrders();
+    // Suscripción en tiempo real
+    const channels = supabase.channel('custom-all-channel')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        fetchOrders();
+      })
+      .subscribe();
+      
+    return () => {
+      supabase.removeChannel(channels);
+    };
+  }, []);
 
   useEffect(() => {
     if (currentUser) {
@@ -78,59 +96,46 @@ export default function App() {
     );
   }, [orders, view, searchTerm]);
 
-  const handleUpdateOrder = (updatedOrder: Order) => {
-    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+  const handleUpdateOrder = async (updatedOrder: Order) => {
+    const { error } = await supabase
+      .from('orders')
+      .update(updatedOrder)
+      .eq('id', updatedOrder.id);
+    
+    if (error) alert("Error al actualizar");
     setSelectedOrder(updatedOrder);
   };
 
-  const handleBatchUpdate = (customerNumber: string, nextStatus: OrderStatus) => {
-    setOrders(prev => prev.map(o => {
-      if (o.customerNumber === customerNumber && o.status !== OrderStatus.ARCHIVED) {
-        return { ...o, status: nextStatus };
-      }
-      return o;
-    }));
+  const handleBatchUpdate = async (customerNumber: string, nextStatus: OrderStatus) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: nextStatus })
+      .eq('customerNumber', customerNumber)
+      .not('status', 'eq', OrderStatus.ARCHIVED);
+    
+    if (error) alert("Error en actualización masiva");
   };
 
-  const handleDeleteOrder = (id: string) => {
-    setOrders(prev => prev.filter(o => o.id !== id));
+  const handleDeleteOrder = async (id: string) => {
+    const { error } = await supabase
+      .from('orders')
+      .delete()
+      .eq('id', id);
+    
+    if (error) alert("Error al eliminar");
     setSelectedOrder(null);
   };
 
-  const handleExportData = (format: 'CSV' | 'JSON') => {
-    if (orders.length === 0) return;
-    const data = orders.map(o => ({
-      ID: o.id,
-      Orden: o.orderNumber,
-      ClienteNum: o.customerNumber,
-      ClienteNombre: o.customerName,
-      Localidad: o.locality,
-      Estado: o.status,
-      Bultos: (o.detailedPackaging || []).reduce((acc, p) => acc + p.quantity, 0),
-      Transporte: o.carrier || 'N/A',
-      Fecha: o.createdAt,
-      Operador: o.reviewer
-    }));
-
-    let blob;
-    let filename = `reporte_dg_logistica_${new Date().toISOString().split('T')[0]}`;
-
-    if (format === 'CSV') {
-      const headers = Object.keys(data[0]).join(',');
-      const rows = data.map(row => Object.values(row).map(val => `"${val}"`).join(','));
-      const csvContent = [headers, ...rows].join('\n');
-      blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      filename += '.csv';
+  const handleAddOrder = async (newOrder: Partial<Order>) => {
+    const { error } = await supabase
+      .from('orders')
+      .insert([newOrder]);
+    
+    if (error) {
+      alert("Error al guardar pedido en base de datos");
     } else {
-      blob = new Blob([JSON.stringify(orders, null, 2)], { type: 'application/json' });
-      filename += '.json';
+      setView('PENDING');
     }
-
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    link.click();
-    setShowExportModal(false);
   };
 
   if (isCustomerMode) return <CustomerPortal onBack={() => setIsCustomerMode(false)} orders={orders} />;
@@ -159,65 +164,10 @@ export default function App() {
               <SidebarItem icon={<PlusSquare size={20}/>} label="CARGA DE ENVÍO" active={view === 'NEW_ORDER_MANUAL'} onClick={() => { setView('NEW_ORDER_MANUAL'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<Activity size={20}/>} label="Seguimiento de Pedido" active={view === 'TRACKING'} onClick={() => { setView('TRACKING'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<History size={20}/>} label="Historial de Archivo" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
-              
-              <SidebarItem 
-                icon={<FileDown size={20}/>} 
-                label="Descargar Reporte" 
-                onClick={() => { setShowExportModal(true); setIsSidebarOpen(false); }} 
-              />
             </nav>
             <div className="p-4 border-t">
                <SidebarItem icon={<LogOut size={20}/>} label="Salir" onClick={() => setCurrentUser(null)} danger />
             </div>
-          </div>
-        </div>
-      )}
-
-      {showExportModal && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[500] flex items-center justify-center p-6">
-          <div className="bg-white w-full max-w-xs rounded-[40px] p-8 space-y-6 shadow-2xl animate-in zoom-in duration-200">
-            <div className="text-center space-y-2">
-              <div className="w-16 h-16 bg-teal-100 text-teal-600 rounded-3xl flex items-center justify-center mx-auto mb-4">
-                <FileDown size={32} />
-              </div>
-              <h3 className="font-black text-xl text-slate-800 uppercase italic">Exportar Datos</h3>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Selecciona el formato de descarga</p>
-            </div>
-            
-            <div className="space-y-3">
-              <button 
-                onClick={() => handleExportData('CSV')}
-                className="w-full bg-slate-50 border-2 border-slate-100 p-5 rounded-3xl flex items-center gap-4 hover:border-teal-500 transition-all active:scale-95 group"
-              >
-                <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-colors">
-                  <FileSpreadsheet size={20} />
-                </div>
-                <div className="text-left">
-                  <p className="font-black text-xs text-slate-700">Excel (CSV)</p>
-                  <p className="text-[9px] font-bold text-slate-400">Hoja de cálculo</p>
-                </div>
-              </button>
-
-              <button 
-                onClick={() => handleExportData('JSON')}
-                className="w-full bg-slate-50 border-2 border-slate-100 p-5 rounded-3xl flex items-center gap-4 hover:border-teal-500 transition-all active:scale-95 group"
-              >
-                <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:bg-indigo-500 group-hover:text-white transition-colors">
-                  <FileJson size={20} />
-                </div>
-                <div className="text-left">
-                  <p className="font-black text-xs text-slate-700">JSON Data</p>
-                  <p className="text-[9px] font-bold text-slate-400">Archivo de sistema</p>
-                </div>
-              </button>
-            </div>
-
-            <button 
-              onClick={() => setShowExportModal(false)}
-              className="w-full py-4 text-[10px] font-black uppercase text-slate-400 tracking-widest"
-            >
-              Cerrar
-            </button>
           </div>
         </div>
       )}
@@ -229,7 +179,14 @@ export default function App() {
       </header>
 
       <main className="p-5 space-y-6">
-        {view === 'DASHBOARD' && (
+        {isLoading && (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
+            <Loader2 className="animate-spin" size={32} />
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando Base de Datos...</p>
+          </div>
+        )}
+
+        {!isLoading && view === 'DASHBOARD' && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <StatCard count={stats.pending} label="Pendientes" color="bg-orange-500" icon={<ClipboardList />} onClick={() => setView('PENDING')} />
@@ -254,7 +211,7 @@ export default function App() {
           </div>
         )}
 
-        {(view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
+        {!isLoading && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <button onClick={() => setView('DASHBOARD')} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest"><ArrowLeft size={14}/> Dashboard</button>
@@ -284,7 +241,7 @@ export default function App() {
           </div>
         )}
 
-        {view === 'TRACKING' && (
+        {!isLoading && view === 'TRACKING' && (
           <TrackingInternalView 
             orders={orders} 
             onBack={() => setView('DASHBOARD')} 
@@ -292,9 +249,9 @@ export default function App() {
           />
         )}
 
-        {view === 'NEW_ORDER_MANUAL' && (
+        {!isLoading && view === 'NEW_ORDER_MANUAL' && (
           <NewOrderForm 
-            onAdd={(o: Order) => { setOrders([o, ...orders]); setView('PENDING'); }} 
+            onAdd={handleAddOrder} 
             onBack={() => setView('DASHBOARD')} 
             reviewer={currentUser?.name || 'Sistema'} 
           />
@@ -322,6 +279,7 @@ export default function App() {
   );
 }
 
+// Reutilizamos el resto de subcomponentes igual, solo ajustando los hooks de arriba.
 // --- VISTA DE SEGUIMIENTO INTERNA ---
 
 function TrackingInternalView({ orders, onBack, onSelectOrder }: { orders: Order[], onBack: () => void, onSelectOrder: (o: Order) => void }) {
@@ -385,8 +343,6 @@ function TrackingInternalView({ orders, onBack, onSelectOrder }: { orders: Order
   );
 }
 
-// --- COMPONENTES SECUNDARIOS ---
-
 function SidebarItem({ icon, label, active, onClick, danger }: any) {
   return (
     <button onClick={onClick} className={`w-full flex items-center gap-4 p-4 rounded-2xl font-bold text-sm transition-all ${active ? 'bg-teal-50 text-teal-600' : danger ? 'text-red-500 hover:bg-red-50' : 'text-slate-600 hover:bg-slate-50'}`}>
@@ -417,7 +373,8 @@ function NavBtn({ icon, active, onClick }: any) {
   );
 }
 
-function OrderCard({ order, onClick, allOrders }: { order: Order, onClick: () => void, allOrders: Order[] }) {
+// Fix: Added optional key property to props type to resolve TypeScript assignment error in list rendering
+function OrderCard({ order, onClick, allOrders }: { order: Order; onClick: () => void; allOrders: Order[]; key?: string }) {
   const bultos = (order.detailedPackaging || []).reduce((a, c) => a + c.quantity, 0);
   const linkedOrders = allOrders.filter(o => o.customerNumber === order.customerNumber && o.status !== OrderStatus.ARCHIVED);
   const otherLinkedOrders = linkedOrders.filter(o => o.id !== order.id);
@@ -815,7 +772,6 @@ function NewOrderForm({ onAdd, onBack, reviewer }: any) {
   const submit = () => {
     if(!form.orderNumber || !form.nro || !form.name) return alert("Faltan datos obligatorios: Nº de Orden, Cliente y Razón Social son requeridos.");
     onAdd({
-      id: Date.now().toString(),
       orderNumber: form.orderNumber.toUpperCase(),
       customerNumber: form.nro,
       customerName: form.name.toUpperCase(),
