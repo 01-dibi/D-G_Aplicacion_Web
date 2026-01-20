@@ -5,10 +5,11 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle
+  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send
 } from 'lucide-react';
-import { Order, OrderStatus, View } from './types';
+import { Order, OrderStatus, View, PackagingEntry } from './types';
 import { supabase, connectionStatus } from './supabaseClient';
+import { analyzeOrderText } from './geminiService';
 
 export default function App() {
   const [isCustomerMode, setIsCustomerMode] = useState(false);
@@ -58,6 +59,8 @@ export default function App() {
         notes: o.notes,
         reviewer: o.reviewer,
         source: o.source,
+        carrier: o.carrier,
+        detailedPackaging: o.detailed_packaging || [],
         createdAt: o.created_at
       }));
 
@@ -96,7 +99,7 @@ export default function App() {
     pending: orders.filter(o => o.status === OrderStatus.PENDING).length,
     completed: orders.filter(o => o.status === OrderStatus.COMPLETED).length,
     dispatched: orders.filter(o => o.status === OrderStatus.DISPATCHED).length,
-    total: orders.filter(o => o.status === OrderStatus.ARCHIVED || o.status === OrderStatus.DISPATCHED).length
+    total: orders.filter(o => o.status === OrderStatus.ARCHIVED).length
   }), [orders]);
 
   const filteredOrders = useMemo(() => {
@@ -117,7 +120,9 @@ export default function App() {
   const handleUpdateOrder = async (updatedOrder: Order) => {
     const { error } = await supabase.from('orders').update({
       status: updatedOrder.status,
-      notes: updatedOrder.notes
+      notes: updatedOrder.notes,
+      carrier: updatedOrder.carrier,
+      detailed_packaging: updatedOrder.detailedPackaging
     }).eq('id', updatedOrder.id);
     
     if (error) alert("Error: " + error.message);
@@ -141,10 +146,10 @@ export default function App() {
         customer_number: String(newOrderData.customerNumber),
         customer_name: newOrderData.customerName,
         locality: newOrderData.locality || 'GENERAL',
-        status: newOrderData.status || OrderStatus.PENDING,
+        status: OrderStatus.PENDING,
         notes: newOrderData.notes || '',
-        reviewer: newOrderData.reviewer || 'Sistema',
-        source: 'Manual'
+        reviewer: currentUser?.name || 'Sistema',
+        source: newOrderData.source || 'Manual'
       };
 
       const { error } = await supabase.from('orders').insert([payload]);
@@ -155,12 +160,16 @@ export default function App() {
       await fetchOrders();
       alert("✅ PEDIDO GUARDADO EXITOSAMENTE");
     } catch (err: any) {
-      console.error("Critical Save Error:", err);
       setDbError({ message: err.message, code: err.code });
       alert(`❌ ERROR: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const sendWhatsApp = (order: Order) => {
+    const msg = `📦 *D&G Logística - Informe de Pedido*%0A%0AHola *${order.customerName}*, tu pedido *#${order.orderNumber}* se encuentra en estado: *${order.status}*.%0A%0ALocalidad: ${order.locality}%0A${order.carrier ? `Transporte: ${order.carrier}` : ''}%0A%0AGracias por elegirnos.`;
+    window.open(`https://wa.me/?text=${msg}`, '_blank');
   };
 
   if (isCustomerMode) return <CustomerPortal onBack={() => setIsCustomerMode(false)} orders={orders} />;
@@ -170,8 +179,8 @@ export default function App() {
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-24 font-sans relative overflow-x-hidden">
       
       {isSidebarOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200]">
-          <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-2xl flex flex-col">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200]" onClick={() => setIsSidebarOpen(false)}>
+          <div className="absolute left-0 top-0 bottom-0 w-72 bg-white shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-8 bg-slate-900 text-white">
               <h1 className="text-2xl font-black italic mb-6">D&G <span className="text-orange-500">Logística</span></h1>
               <div className="flex items-center gap-3">
@@ -202,33 +211,22 @@ export default function App() {
         <div className="flex flex-col items-center">
           <h1 className="text-lg font-black tracking-tighter uppercase italic leading-none">D&G <span className="text-orange-500">Logistics</span></h1>
           <div className="flex items-center gap-1 mt-1">
-            <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest animate-pulse"><Wifi size={8}/> SISTEMA ONLINE</span>
+            <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest animate-pulse"><Wifi size={8}/> ONLINE</span>
           </div>
         </div>
         <div className="w-10 h-10 bg-teal-500 rounded-2xl flex items-center justify-center font-bold shadow-lg shadow-teal-500/20">{currentUser.name[0]}</div>
       </header>
 
       <main className="p-5 space-y-6">
-        {dbError && (
-          <div className="bg-red-50 border-2 border-red-200 p-6 rounded-[32px] space-y-3">
-             <div className="flex items-center gap-3 text-red-600">
-                <AlertCircle size={20}/>
-                <h4 className="font-black text-xs uppercase">Error de Conexión</h4>
-             </div>
-             <p className="text-[10px] text-red-500 font-bold">{dbError.message}</p>
-             <button onClick={fetchOrders} className="w-full bg-red-600 text-white py-2 rounded-xl text-[9px] font-black uppercase">Reintentar</button>
-          </div>
-        )}
-
         {isLoading && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
             <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando Base de Datos...</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando...</p>
           </div>
         )}
 
         {!isLoading && view === 'DASHBOARD' && (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-in fade-in duration-500">
             <div className="grid grid-cols-2 gap-4">
               <StatCard count={stats.pending} label="Pendientes" color="bg-orange-500" icon={<ClipboardList />} onClick={() => setView('PENDING')} />
               <StatCard count={stats.completed} label="Preparados" color="bg-emerald-600" icon={<CheckCircle2 />} onClick={() => setView('COMPLETED')} />
@@ -238,14 +236,15 @@ export default function App() {
             
             <button 
               onClick={() => setIsNewOrderModalOpen(true)}
-              className="w-full bg-slate-900 text-white p-6 rounded-[32px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all relative overflow-hidden"
+              className="w-full bg-slate-900 text-white p-7 rounded-[40px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all relative overflow-hidden group"
             >
-              <div className="w-12 h-12 bg-white/10 text-orange-500 rounded-2xl flex items-center justify-center">
-                <PlusSquare size={24} />
+              <div className="absolute inset-0 bg-gradient-to-r from-orange-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              <div className="w-14 h-14 bg-white/10 text-orange-500 rounded-2xl flex items-center justify-center">
+                <PlusSquare size={28} />
               </div>
               <div className="text-left">
-                <h4 className="font-black uppercase tracking-tighter text-sm">CARGA DE ENVÍO</h4>
-                <p className="text-[10px] font-bold opacity-60 italic">Ingresar nuevo pedido a la nube</p>
+                <h4 className="font-black uppercase tracking-tighter text-base">CARGA DE ENVÍO</h4>
+                <p className="text-[11px] font-bold opacity-60 italic">Ingresar nuevo pedido manual o IA</p>
               </div>
               <ChevronRight className="ml-auto opacity-50" />
             </button>
@@ -253,16 +252,16 @@ export default function App() {
         )}
 
         {!isLoading && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-in slide-in-from-bottom duration-300">
             <div className="flex items-center justify-between">
               <button onClick={() => setView('DASHBOARD')} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest"><ArrowLeft size={14}/> Dashboard</button>
-              <h2 className="font-black text-xs text-slate-500 uppercase tracking-widest">{view}</h2>
+              <h2 className="font-black text-xs text-slate-500 uppercase tracking-widest">{view === 'ALL' ? 'Historial' : view}</h2>
             </div>
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
               <input 
                 type="text" 
-                placeholder="Buscar por cliente o localidad..." 
+                placeholder="Filtrar por nombre o ciudad..." 
                 className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none focus:border-teal-500 transition-all shadow-sm"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -272,24 +271,25 @@ export default function App() {
               {filteredOrders.length > 0 ? filteredOrders.map(order => (
                 <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} allOrders={orders} />
               )) : (
-                <div className="text-center py-16 opacity-30 flex flex-col items-center">
-                   <Package size={48} className="mb-4" />
-                   <p className="text-xs font-black uppercase tracking-widest">Sin registros en esta etapa</p>
+                <div className="text-center py-20 opacity-20 flex flex-col items-center">
+                   <Package size={64} className="mb-4" />
+                   <p className="text-xs font-black uppercase tracking-widest italic">Sin pedidos en esta sección</p>
                 </div>
               )}
             </div>
           </div>
         )}
+
+        {view === 'TRACKING' && <TrackingInternalView orders={orders} onBack={() => setView('DASHBOARD')} onSelectOrder={setSelectedOrder} />}
       </main>
 
       {isNewOrderModalOpen && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[600] flex items-center justify-center p-5">
-          <div className="bg-white w-full max-w-md rounded-[40px] p-8 shadow-2xl relative overflow-hidden animate-in zoom-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl relative overflow-hidden animate-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
             <button onClick={() => setIsNewOrderModalOpen(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-900 transition-colors"><X/></button>
             <NewOrderForm 
               onAdd={handleAddOrder} 
               onBack={() => setIsNewOrderModalOpen(false)} 
-              reviewer={currentUser?.name || 'Sistema'} 
               isSaving={isSaving}
             />
           </div>
@@ -302,10 +302,11 @@ export default function App() {
           onClose={() => setSelectedOrder(null)} 
           onUpdate={handleUpdateOrder}
           onDelete={handleDeleteOrder}
+          onWhatsApp={() => sendWhatsApp(selectedOrder)}
         />
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t p-4 flex justify-around items-center max-w-md mx-auto rounded-t-[32px] shadow-lg z-40">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-4 flex justify-around items-center max-w-md mx-auto rounded-t-[40px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-40">
         <NavBtn icon={<LayoutDashboard />} active={view === 'DASHBOARD'} onClick={() => setView('DASHBOARD')} />
         <NavBtn icon={<Activity />} active={view === 'TRACKING'} onClick={() => setView('TRACKING')} />
         <NavBtn icon={<ClipboardList />} active={view === 'PENDING'} onClick={() => setView('PENDING')} />
@@ -315,48 +316,208 @@ export default function App() {
   );
 }
 
-function NewOrderForm({ onAdd, onBack, reviewer, isSaving }: any) {
+function NewOrderForm({ onAdd, onBack, isSaving }: any) {
   const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
+  const [aiText, setAiText] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [useAi, setUseAi] = useState(false);
   
+  const processAi = async () => {
+    if(!aiText) return;
+    setIsAiLoading(true);
+    const result = await analyzeOrderText(aiText);
+    if(result) {
+      setForm({
+        ...form,
+        name: result.customerName?.toUpperCase() || '',
+        locality: result.locality?.toUpperCase() || ''
+      });
+      setUseAi(false);
+    } else {
+      alert("No se pudo analizar el texto. Intente manual.");
+    }
+    setIsAiLoading(false);
+  };
+
   const submit = () => {
-    if(!form.orderNumber || !form.name) return alert("Falta Nº Orden o Cliente");
+    if(!form.orderNumber || !form.name) return alert("Falta Nº Orden o Razón Social");
     onAdd({
       orderNumber: form.orderNumber.toUpperCase(),
       customerNumber: form.nro,
       customerName: form.name.toUpperCase(),
       locality: form.locality.toUpperCase() || 'GENERAL',
-      status: OrderStatus.PENDING,
       notes: form.notes, 
-      source: 'Manual',
-      reviewer
+      source: aiText ? 'IA' : 'Manual'
     });
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-4">
       <div className="text-center">
         <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800 leading-none">Carga de Envío</h2>
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2 italic">Guardado directo en la nube</p>
-      </div>
-      <div className="space-y-4">
-        <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="1450" />
-          <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="FIRMAT" />
-        </div>
-        <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre del Comercio" />
-        <div className="space-y-2">
-          <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Observaciones</label>
-          <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-24 shadow-inner" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
+        <div className="flex justify-center gap-4 mt-4">
+          <button onClick={() => setUseAi(false)} className={`text-[10px] font-black uppercase tracking-widest pb-1 border-b-2 transition-all ${!useAi ? 'border-orange-500 text-slate-800' : 'border-transparent text-slate-300'}`}>Manual</button>
+          <button onClick={() => setUseAi(true)} className={`text-[10px] font-black uppercase tracking-widest pb-1 border-b-2 transition-all flex items-center gap-1 ${useAi ? 'border-orange-500 text-slate-800' : 'border-transparent text-slate-300'}`}><Sparkles size={10}/> Con IA</button>
         </div>
       </div>
+
+      {useAi ? (
+        <div className="space-y-4 animate-in fade-in">
+          <div className="space-y-2">
+            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Pegar mensaje de WhatsApp</label>
+            <textarea 
+              className="w-full bg-slate-50 p-4 rounded-3xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-40 shadow-inner" 
+              placeholder="Hola, el pedido para Bazar Firmat..." 
+              value={aiText}
+              onChange={e => setAiText(e.target.value)}
+            />
+          </div>
+          <button 
+            disabled={isAiLoading || !aiText}
+            onClick={processAi}
+            className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+          >
+            {isAiLoading ? <Loader2 className="animate-spin" size={14}/> : <><Sparkles size={14}/> ANALIZAR TEXTO</>}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-4 animate-in fade-in">
+          <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="1450" />
+            <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="FIRMAT" />
+          </div>
+          <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre del Comercio" />
+          <div className="space-y-2">
+            <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Observaciones</label>
+            <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-24 shadow-inner" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
+          </div>
+        </div>
+      )}
+
       <button 
-        disabled={isSaving}
+        disabled={isSaving || (useAi && isAiLoading)}
         onClick={submit} 
         className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
       >
         {isSaving ? <Loader2 className="animate-spin" size={18}/> : 'CONFIRMAR INGRESO'}
       </button>
+    </div>
+  );
+}
+
+function OrderDetailsModal({ order, onClose, onUpdate, onDelete, onWhatsApp }: any) {
+  const [isEditingPackaging, setIsEditingPackaging] = useState(false);
+  const [carrier, setCarrier] = useState(order.carrier || '');
+  const [packaging, setPackaging] = useState<PackagingEntry[]>(order.detailedPackaging || []);
+  const [newPackage, setNewPackage] = useState({ type: 'Caja', quantity: 1, deposit: 'D1' });
+
+  const addPackage = () => {
+    const entry = { id: Date.now().toString(), ...newPackage };
+    setPackaging([...packaging, entry]);
+  };
+
+  const removePackage = (id: string) => {
+    setPackaging(packaging.filter(p => p.id !== id));
+  };
+
+  const saveDetails = () => {
+    onUpdate({ ...order, detailedPackaging: packaging, carrier });
+    setIsEditingPackaging(false);
+  };
+
+  const advanceStage = () => {
+    const stages = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
+    const nextIdx = stages.indexOf(order.status) + 1;
+    if (nextIdx < stages.length) {
+      onUpdate({ ...order, status: stages[nextIdx] });
+      onClose();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[700] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
+        <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors"><X/></button>
+        
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{order.source}</span>
+            <span className="text-[10px] font-black text-teal-600 uppercase tracking-tighter">ORDEN #{order.orderNumber}</span>
+          </div>
+          <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic pr-8">{order.customerName}</h2>
+          <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-3">
+             <MapPin size={10} className="text-orange-500" /> {order.locality}
+          </div>
+        </div>
+
+        <div className="space-y-4 mb-8">
+          {/* Status Progress */}
+          <div className="p-5 bg-slate-50 rounded-[32px] border border-slate-100">
+             <div className="flex justify-between items-center mb-4">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Estado Actual</span>
+                <span className="text-[10px] font-black text-teal-600 uppercase bg-white px-4 py-1.5 rounded-full shadow-sm border border-teal-50">{order.status}</span>
+             </div>
+             
+             {/* Dynamic Content based on Stage */}
+             {order.status === OrderStatus.COMPLETED && (
+               <div className="space-y-4 border-t pt-4 mt-2">
+                  <h4 className="text-[9px] font-black text-slate-800 uppercase tracking-widest">Detalle de Bultos</h4>
+                  <div className="space-y-2">
+                    {packaging.map(p => (
+                      <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
+                         <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-slate-50 rounded-xl flex items-center justify-center font-black text-xs text-slate-400">{p.quantity}</div>
+                            <span className="text-xs font-bold text-slate-700">{p.type} <span className="text-[8px] opacity-30">({p.deposit})</span></span>
+                         </div>
+                         <button onClick={() => removePackage(p.id)} className="text-red-300 hover:text-red-500"><Trash2 size={14}/></button>
+                      </div>
+                    ))}
+                    <div className="grid grid-cols-3 gap-2">
+                       <input type="number" className="bg-white border rounded-xl p-2 text-xs font-bold outline-none" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
+                       <select className="bg-white border rounded-xl p-2 text-[10px] font-black uppercase outline-none" value={newPackage.type} onChange={e=>setNewPackage({...newPackage, type: e.target.value})}>
+                          <option>Caja</option><option>Pack</option><option>Unidad</option><option>Bolsa</option>
+                       </select>
+                       <button onClick={addPackage} className="bg-teal-500 text-white rounded-xl flex items-center justify-center"><Plus size={16}/></button>
+                    </div>
+                  </div>
+               </div>
+             )}
+
+             {order.status === OrderStatus.DISPATCHED && (
+               <div className="space-y-3 border-t pt-4 mt-2">
+                  <h4 className="text-[9px] font-black text-slate-800 uppercase tracking-widest">Información de Despacho</h4>
+                  <input 
+                    className="w-full bg-white border rounded-2xl p-4 text-xs font-bold outline-none focus:border-teal-500" 
+                    placeholder="Nombre del Transporte / Chofer" 
+                    value={carrier}
+                    onChange={e => setCarrier(e.target.value)}
+                  />
+               </div>
+             )}
+          </div>
+
+          <div className="p-5 bg-slate-50 rounded-[32px] border border-slate-100">
+             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observaciones</span>
+             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones específicas"}</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+             <button onClick={onWhatsApp} className="bg-emerald-500 text-white py-4 rounded-3xl font-black uppercase text-[10px] tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all"><MessageCircle size={16}/> WhatsApp</button>
+             <button onClick={advanceStage} className="bg-slate-900 text-white py-4 rounded-3xl font-black uppercase text-[10px] tracking-widest shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-all">Siguiente <ChevronRight size={14}/></button>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            <button onClick={() => { if(confirm("¿Eliminar pedido?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-3xl text-[9px] font-black uppercase border border-red-100 active:bg-red-100">Eliminar</button>
+            { (order.status === OrderStatus.COMPLETED || order.status === OrderStatus.DISPATCHED) && (
+              <button onClick={saveDetails} className="py-4 bg-teal-50 text-teal-600 rounded-3xl text-[9px] font-black uppercase border border-teal-100">Guardar Cambios</button>
+            )}
+            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-400 rounded-3xl text-[9px] font-black uppercase active:bg-slate-200">Cerrar</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -372,12 +533,12 @@ function SidebarItem({ icon, label, active, onClick, danger }: any) {
 
 function StatCard({ count, label, color, icon, onClick }: any) {
   return (
-    <button onClick={onClick} className={`${color} p-6 rounded-[32px] text-white flex flex-col justify-between h-40 text-left shadow-lg active:scale-95 transition-all overflow-hidden relative`}>
-      <div className="absolute -right-4 -top-4 opacity-10">{React.cloneElement(icon as React.ReactElement, { size: 90 } as any)}</div>
-      <div className="bg-white/20 w-8 h-8 rounded-lg flex items-center justify-center backdrop-blur-md">{React.cloneElement(icon as React.ReactElement, { size: 16 } as any)}</div>
+    <button onClick={onClick} className={`${color} p-6 rounded-[35px] text-white flex flex-col justify-between h-44 text-left shadow-xl active:scale-95 transition-all overflow-hidden relative group`}>
+      <div className="absolute -right-4 -top-4 opacity-10 group-hover:scale-110 transition-transform duration-700">{React.cloneElement(icon as React.ReactElement, { size: 100 } as any)}</div>
+      <div className="bg-white/20 w-10 h-10 rounded-2xl flex items-center justify-center backdrop-blur-md">{React.cloneElement(icon as React.ReactElement, { size: 20 } as any)}</div>
       <div>
-        <h3 className="text-3xl font-black">{count}</h3>
-        <p className="text-[9px] font-black uppercase tracking-widest opacity-80">{label}</p>
+        <h3 className="text-4xl font-black mb-1">{count}</h3>
+        <p className="text-[10px] font-black uppercase tracking-widest opacity-80">{label}</p>
       </div>
     </button>
   );
@@ -385,8 +546,9 @@ function StatCard({ count, label, color, icon, onClick }: any) {
 
 function NavBtn({ icon, active, onClick }: any) {
   return (
-    <button onClick={onClick} className={`p-4 rounded-2xl transition-all ${active ? 'text-teal-500 bg-teal-50' : 'text-slate-300'}`}>
+    <button onClick={onClick} className={`p-4 rounded-2xl transition-all relative ${active ? 'text-teal-600 bg-teal-50' : 'text-slate-300 hover:text-slate-400'}`}>
       {React.cloneElement(icon, { size: 24 } as any)}
+      {active && <span className="absolute bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-teal-600 rounded-full"></span>}
     </button>
   );
 }
@@ -395,105 +557,71 @@ function Input({ label, value, onChange, placeholder }: any) {
   return (
     <div className="space-y-2">
       <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">{label}</label>
-      <input className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all shadow-inner" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} />
+      <input className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all shadow-inner uppercase" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} />
     </div>
   );
 }
 
 function OrderCard({ order, onClick, allOrders }: any) {
   const isGrouped = allOrders?.filter((o:any) => o.customerNumber === order.customerNumber && o.status !== OrderStatus.ARCHIVED).length > 1;
+  const bultos = order.detailedPackaging?.reduce((acc: number, p: any) => acc + p.quantity, 0) || 0;
+
   return (
-    <div onClick={onClick} className={`bg-white p-6 rounded-[32px] border-2 shadow-sm relative overflow-hidden cursor-pointer active:scale-98 transition-all ${isGrouped ? 'border-teal-500/20 shadow-teal-100/50' : 'border-slate-100'}`}>
-      <div className="flex justify-between items-start mb-3">
+    <div onClick={onClick} className={`bg-white p-6 rounded-[40px] border-2 shadow-sm relative overflow-hidden cursor-pointer active:scale-[0.98] transition-all ${isGrouped ? 'border-teal-500/20 shadow-teal-100/30' : 'border-slate-100'}`}>
+      <div className="flex justify-between items-start mb-4">
         <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-400 uppercase leading-none mb-1 tracking-widest">ORDEN</span>
-          <span className="text-[10px] font-black text-teal-600 tracking-tighter">#{order.orderNumber}</span>
+          <span className="text-[7px] font-black text-slate-300 uppercase leading-none mb-1 tracking-widest">#ORDEN {order.orderNumber}</span>
+          <span className="text-[10px] font-black text-teal-600 tracking-tighter uppercase">{order.locality}</span>
         </div>
-        <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase ${
+        <span className={`text-[8px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest ${
           order.status === OrderStatus.PENDING ? 'bg-orange-100 text-orange-600' :
           order.status === OrderStatus.COMPLETED ? 'bg-emerald-100 text-emerald-600' :
           order.status === OrderStatus.DISPATCHED ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
         }`}>{order.status}</span>
       </div>
-      <h3 className="font-black text-slate-800 text-sm mb-1 leading-tight">{order.customerName}</h3>
-      <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-        <MapPin size={10} className="text-orange-500" /> {order.locality}
-      </div>
-    </div>
-  );
-}
-
-function OrderDetailsModal({ order, onClose, onUpdate, onDelete }: any) {
-  return (
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[700] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl relative animate-in zoom-in duration-200 overflow-y-auto max-h-[90vh]">
-        <button onClick={onClose} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900 transition-colors"><X/></button>
-        <div className="mb-6">
-          <h2 className="text-2xl font-black text-slate-800 leading-tight italic">{order.customerName}</h2>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Nº {order.orderNumber} • {order.locality}</p>
-        </div>
-
-        <div className="space-y-4 mb-8">
-          <div className="flex justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 items-center">
-             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Etapa Actual</span>
-             <span className="text-[10px] font-black text-teal-600 uppercase bg-teal-50 px-3 py-1 rounded-full">{order.status}</span>
-          </div>
-          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Observaciones de Depósito</span>
-             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones especiales"}</p>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <button 
-            onClick={() => {
-              const statuses = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
-              const currentIndex = statuses.indexOf(order.status);
-              const nextIndex = currentIndex + 1;
-              if (nextIndex < statuses.length) {
-                onUpdate({...order, status: statuses[nextIndex]});
-                onClose();
-              }
-            }}
-            className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
-          >
-            Avanzar Etapa <ChevronRight size={16}/>
-          </button>
-          
-          <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => { if(confirm("¿Eliminar este pedido definitivamente?")) { onDelete(order.id); onClose(); } }} className="py-4 bg-red-50 text-red-500 rounded-2xl text-[10px] font-black uppercase border border-red-100">Eliminar</button>
-            <button onClick={onClose} className="py-4 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase">Cerrar</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function LoginModal({ onLogin, onClientAccess }: any) {
-  const [n, setN] = useState('');
-
-  return (
-    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 z-[1000]">
-      <div className="bg-white w-full max-w-sm rounded-[48px] p-12 text-center space-y-8 animate-in zoom-in duration-300 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-500 to-teal-500"></div>
-        <h1 className="text-6xl font-black italic tracking-tighter leading-none mb-4">D<span className="text-orange-500">&</span>G</h1>
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Logistics Intelligence</p>
-        
-        <div className="space-y-4 pt-4">
-          <input className="w-full bg-slate-50 p-5 rounded-3xl text-center font-bold outline-none border-2 border-transparent focus:border-teal-500 transition-all shadow-inner uppercase text-sm" placeholder="Operador" value={n} onChange={e=>setN(e.target.value)} />
-          <button onClick={()=>onLogin({name:n||'OPERADOR'})} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase shadow-xl tracking-widest text-xs active:scale-95 transition-all">Iniciar Sesión</button>
-        </div>
-        
-        <div className="flex flex-col gap-3 pt-6 border-t border-slate-100">
-           <button onClick={onClientAccess} className="text-[10px] font-black text-teal-600 uppercase w-full tracking-widest hover:underline flex items-center justify-center gap-2"><Search size={14}/> Seguimiento Clientes</button>
-           <div className="flex items-center justify-center gap-2 mt-2">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Nube Conectada</span>
+      
+      <h3 className="font-black text-slate-800 text-lg mb-3 leading-[0.85] italic">{order.customerName}</h3>
+      
+      <div className="flex items-center justify-between border-t pt-4 mt-2">
+         <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+            <Package size={12} className="text-slate-300" /> {bultos > 0 ? `${bultos} bultos` : 'Sin bultos'}
+         </div>
+         {order.carrier && (
+           <div className="flex items-center gap-1 text-[8px] font-black text-indigo-500 uppercase">
+              <Truck size={10}/> {order.carrier}
            </div>
-        </div>
+         )}
       </div>
-      <p className="mt-8 text-[8px] font-black text-white/20 uppercase tracking-[0.5em] italic">Firmat, Santa Fe • v2.6</p>
+    </div>
+  );
+}
+
+function TrackingInternalView({ orders, onBack, onSelectOrder }: any) {
+  const [q, setQ] = useState('');
+  const results = orders.filter((o:any) => 
+    (o.customerName?.toLowerCase() || '').includes(q.toLowerCase()) || 
+    (o.orderNumber || '').includes(q) ||
+    (o.locality?.toLowerCase() || '').includes(q.toLowerCase())
+  );
+  return (
+    <div className="space-y-4 animate-in slide-in-from-right duration-400">
+      <button onClick={onBack} className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2"><ArrowLeft size={14}/> Volver al Dashboard</button>
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+        <input 
+          className="w-full bg-white border-2 border-slate-100 p-5 pl-14 rounded-[30px] text-sm font-bold outline-none focus:border-teal-500 transition-all shadow-md" 
+          placeholder="Buscar comercio, ciudad o Nº..." 
+          value={q} 
+          onChange={e=>setQ(e.target.value)} 
+        />
+      </div>
+      <div className="space-y-3">
+        {results.length > 0 ? results.map((o:any) => (
+          <OrderCard key={o.id} order={o} onClick={() => onSelectOrder(o)} allOrders={orders} />
+        )) : (
+          <p className="text-center py-20 text-slate-400 text-[10px] font-black uppercase tracking-widest italic opacity-30">Sin resultados para esta búsqueda</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -505,15 +633,18 @@ function CustomerPortal({ onBack, orders }: any) {
   return (
     <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col">
       <header className="flex items-center gap-4">
-        <button onClick={onBack} className="p-3 bg-white border border-slate-100 rounded-2xl shadow-sm text-slate-400 active:scale-90 transition-all"><ArrowLeft/></button>
-        <h2 className="text-2xl font-black italic tracking-tighter">Estado de Envíos</h2>
+        <button onClick={onBack} className="p-4 bg-white border border-slate-100 rounded-2xl shadow-sm text-slate-400 active:scale-90 transition-all"><ArrowLeft/></button>
+        <h2 className="text-2xl font-black italic tracking-tighter">Consulta de Pedidos</h2>
       </header>
       
-      <div className="bg-white p-8 rounded-[40px] border-2 border-slate-100 space-y-4 shadow-xl shadow-slate-200/50">
-        <h3 className="font-black text-xl italic leading-none">Mi Pedido</h3>
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Ingresa tu nombre para ver el estado en tiempo real desde el depósito.</p>
+      <div className="bg-white p-8 rounded-[48px] border-2 border-slate-100 space-y-4 shadow-xl shadow-slate-200/50">
+        <div className="w-14 h-14 bg-teal-500/10 text-teal-600 rounded-2xl flex items-center justify-center mb-2">
+           <HelpCircle size={28} />
+        </div>
+        <h3 className="font-black text-2xl italic leading-[0.85]">¿Dónde está mi pedido?</h3>
+        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">Ingresa tu nombre para ver el estado real del depósito.</p>
         <input 
-          className="w-full bg-slate-50 p-6 rounded-[24px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-sm uppercase tracking-tighter shadow-inner transition-all" 
+          className="w-full bg-slate-50 p-6 rounded-[28px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-base uppercase tracking-tighter shadow-inner transition-all" 
           placeholder="Ej: Bazar Firmat..." 
           value={s} 
           onChange={e=>setS(e.target.value)} 
@@ -521,24 +652,67 @@ function CustomerPortal({ onBack, orders }: any) {
       </div>
 
       <div className="space-y-4 flex-1">
-        {s.length > 2 && r.map((o:any) => (
-          <div key={o.id} className="bg-white p-8 rounded-[40px] shadow-lg border-2 border-slate-50 relative overflow-hidden animate-in slide-in-from-bottom duration-300">
-            <div className="absolute top-0 right-0 p-4 opacity-10"><Package size={60} /></div>
-            <h4 className="font-black text-2xl mb-2 text-slate-800 uppercase italic tracking-tighter leading-none">{o.customerName}</h4>
-            <div className="flex flex-col mb-4">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Estado de Logística</span>
-              <span className={`text-xl font-black uppercase italic tracking-tighter ${
-                o.status === OrderStatus.PENDING ? 'text-orange-500' :
-                o.status === OrderStatus.COMPLETED ? 'text-emerald-500' : 'text-indigo-600'
-              }`}>{o.status}</span>
+        {s.length > 2 ? (
+          r.length > 0 ? r.map((o:any) => (
+            <div key={o.id} className="bg-white p-10 rounded-[48px] shadow-2xl border-2 border-slate-50 animate-in fade-in slide-in-from-bottom duration-300 relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5"><Package size={80} /></div>
+              <h4 className="font-black text-3xl mb-3 text-slate-800 uppercase italic tracking-tighter leading-[0.8]">{o.customerName}</h4>
+              <div className="flex flex-col mb-6">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Estado Logístico</span>
+                <span className={`text-2xl font-black uppercase italic tracking-tighter ${
+                  o.status === OrderStatus.PENDING ? 'text-orange-500' :
+                  o.status === OrderStatus.COMPLETED ? 'text-emerald-500' : 'text-indigo-600'
+                }`}>{o.status}</span>
+              </div>
+              <div className="flex items-center gap-4 p-5 bg-slate-50 rounded-3xl border border-slate-100">
+                 <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center text-teal-500 shadow-sm">
+                    <Truck size={20} />
+                 </div>
+                 <p className="text-[11px] font-bold text-slate-500 italic uppercase">El transporte te notificará en cuanto salga de depósito.</p>
+              </div>
             </div>
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center gap-3">
-               <Truck size={16} className="text-teal-500" />
-               <p className="text-[10px] font-bold text-slate-500 italic uppercase">El transportista te notificará al salir.</p>
+          )) : (
+            <div className="text-center py-20 opacity-30">
+               <Search size={48} className="mx-auto mb-4" />
+               <p className="text-xs font-black uppercase tracking-widest italic leading-relaxed">No encontramos pedidos activos <br/> con ese nombre.</p>
             </div>
-          </div>
-        ))}
+          )
+        ) : s.length > 0 && (
+          <p className="text-center text-[10px] font-black text-slate-300 uppercase tracking-widest animate-pulse">Sigue escribiendo...</p>
+        )}
       </div>
+
+      <p className="text-center text-[9px] font-black text-slate-300 uppercase tracking-widest py-8 italic">D&G Logistics Intelligence • Firmat</p>
+    </div>
+  );
+}
+
+function LoginModal({ onLogin, onClientAccess }: any) {
+  const [n, setN] = useState('');
+
+  return (
+    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 z-[1000]">
+      <div className="bg-white w-full max-w-sm rounded-[56px] p-12 text-center space-y-10 animate-in zoom-in duration-500 shadow-[0_30px_100px_rgba(0,0,0,0.5)] relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-500 via-teal-500 to-indigo-500"></div>
+        <div className="space-y-2">
+          <h1 className="text-7xl font-black italic tracking-tighter leading-none">D<span className="text-orange-500">&</span>G</h1>
+          <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.4em] italic">Warehouse System</p>
+        </div>
+        
+        <div className="space-y-5">
+          <input className="w-full bg-slate-50 p-6 rounded-3xl text-center font-black outline-none border-2 border-transparent focus:border-teal-500 transition-all shadow-inner uppercase text-base tracking-tighter" placeholder="OPERADOR" value={n} onChange={e=>setN(e.target.value)} />
+          <button onClick={()=>onLogin({name:n||'OPERADOR'})} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase shadow-2xl tracking-widest text-sm active:scale-95 transition-all">INGRESAR AL SISTEMA</button>
+        </div>
+        
+        <div className="flex flex-col gap-4 pt-8 border-t border-slate-100">
+           <button onClick={onClientAccess} className="text-[11px] font-black text-teal-600 uppercase w-full tracking-widest hover:underline flex items-center justify-center gap-2"><Search size={16}/> SEGUIMIENTO CLIENTES</button>
+           <div className="flex items-center justify-center gap-2 mt-4 opacity-50">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Nube Operativa</span>
+           </div>
+        </div>
+      </div>
+      <p className="mt-10 text-[9px] font-black text-white/20 uppercase tracking-[0.6em] italic">FIRMAT, SANTA FE • VERSION 3.0</p>
     </div>
   );
 }
