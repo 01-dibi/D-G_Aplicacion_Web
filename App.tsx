@@ -34,7 +34,6 @@ export default function App() {
 
   const [orders, setOrders] = useState<Order[]>([]);
 
-  // Función de carga de pedidos
   const fetchOrders = async () => {
     if (!connectionStatus.isConfigured) {
       setIsLoading(false);
@@ -88,7 +87,7 @@ export default function App() {
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'orders' },
-          (payload) => {
+          () => {
             fetchOrders();
           }
         )
@@ -204,11 +203,11 @@ export default function App() {
     }
   };
 
-  const sendWhatsApp = (order: Order) => {
-    const bultos = order.detailedPackaging || [];
+  const sendWhatsApp = (order: Order, customPackaging?: PackagingEntry[], customCarrier?: string) => {
+    const bultos = customPackaging || order.detailedPackaging || [];
     const totalBultos = bultos.reduce((acc, p) => acc + (p.quantity || 0), 0);
+    const carrier = customCarrier || order.carrier || 'A DESIGNAR';
     
-    // Mapeo de estados según solicitud
     const statusMap = {
       [OrderStatus.PENDING]: 'PENDIENTE',
       [OrderStatus.COMPLETED]: 'EN PREPARACIÓN',
@@ -216,17 +215,15 @@ export default function App() {
       [OrderStatus.ARCHIVED]: 'ENTREGADO'
     };
 
-    // Formateo de fecha y hora actual
     const now = new Date();
     const dateStr = now.toLocaleDateString('es-AR');
     const timeStr = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: true });
 
-    // Construcción de la lista de bultos
     const bultosText = bultos.length > 0 
-      ? bultos.map(p => `* ${p.quantity} ${p.type} (${p.deposit.replace('Dep. ', '').replace(':', '')})`).join('%0A')
+      ? bultos.map(p => `* ${p.quantity} ${p.type.toUpperCase()} (${p.deposit.replace('Dep. ', '').replace(':', '').trim()})`).join('%0A')
       : '* Sin bultos registrados';
 
-    const msg = `📦 *D&G LOGISTICA*%0A📍 ${order.locality}, #${order.orderNumber} | *${order.customerName}*%0A--------------------------%0A${bultosText}%0ATotal: ${totalBultos} bultos%0A--------------------------%0A👤 ${order.reviewer || 'SISTEMA'} | ✍️ ${currentUser?.name}%0A🚚 ${order.carrier || 'A DESIGNAR'}%0A--------------------------%0AESTADO: ${statusMap[order.status]}%0A--------------------------%0A${dateStr} - ${timeStr}`;
+    const msg = `📦 *D&G LOGISTICA*%0A📍 ${order.locality}, #${order.orderNumber} | *${order.customerName}*%0A--------------------------%0A${bultosText}%0ATotal: ${totalBultos} bultos%0A--------------------------%0A👤 ${order.reviewer || 'SISTEMA'} | ✍️ ${currentUser?.name}%0A🚚 ${carrier}%0A--------------------------%0AESTADO: ${statusMap[order.status]}%0A--------------------------%0A${dateStr} - ${timeStr}`;
     
     window.open(`https://wa.me/?text=${msg}`, '_blank');
   };
@@ -399,7 +396,7 @@ export default function App() {
           onClose={() => setSelectedOrder(null)} 
           onUpdate={handleUpdateOrder}
           onDelete={handleDeleteOrder}
-          onWhatsApp={() => sendWhatsApp(selectedOrder)}
+          onWhatsApp={(data: any) => sendWhatsApp(selectedOrder, data.packaging, data.carrier)}
           onAddCollaborator={() => handleAddCollaborator(selectedOrder)}
           isSaving={isSaving}
         />
@@ -578,8 +575,6 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
   });
 
   const isArchived = order.status === OrderStatus.ARCHIVED;
-
-  // Listas de sub-selectores
   const viaNames = ["MATÍAS", "NICOLÁS"];
   const vendNames = ["MAURO", "GUSTAVO"];
 
@@ -636,8 +631,6 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
 
   const getFinalCarrier = () => {
     let finalCarrier = '';
-    const catUpper = carrierCategory.toUpperCase();
-    
     if (carrierCategory === 'Viajantes') {
       finalCarrier = `VIAJANTE: ${carrierSubDetail.toUpperCase()}`;
     } else if (carrierCategory === 'Vendedores') {
@@ -660,6 +653,13 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
       carrier: getFinalCarrier(),
       customerNumber,
       orderNumber: orderNumbers
+    });
+  };
+
+  const handleNotifyWhatsApp = () => {
+    onWhatsApp({
+      packaging: packaging,
+      carrier: getFinalCarrier()
     });
   };
 
@@ -875,7 +875,7 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
               </div>
             </>
           )}
-          <button onClick={onWhatsApp} className="w-full bg-emerald-500 text-white py-5 rounded-[28px] font-black uppercase text-[11px] mt-6 flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all border-b-4 border-emerald-600">
+          <button onClick={handleNotifyWhatsApp} className="w-full bg-emerald-500 text-white py-5 rounded-[28px] font-black uppercase text-[11px] mt-6 flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all border-b-4 border-emerald-600">
             <MessageCircle size={20}/> Notificar WhatsApp
           </button>
           {isArchived && <button onClick={onClose} className="w-full py-4 bg-slate-100 text-slate-400 rounded-[20px] text-[9px] font-black uppercase mt-3 tracking-widest active:bg-slate-200 transition-all">Cerrar Visualización</button>}
@@ -922,12 +922,11 @@ function Input({ label, value, onChange, placeholder }: any) {
 }
 
 function OrderCard({ order, onClick, allOrders }: any) {
-  const isGrouped = allOrders?.filter((o:any) => o.customerNumber === order.customerNumber && o.status !== OrderStatus.ARCHIVED).length > 1;
-  const bultos = order.detailed_packaging?.reduce((acc: number, p: any) => acc + p.quantity, 0) || order.detailedPackaging?.reduce((acc: number, p: any) => acc + p.quantity, 0) || 0;
+  const bultos = order.detailedPackaging?.reduce((acc: number, p: any) => acc + p.quantity, 0) || 0;
   const hasReviewer = !!order.reviewer && order.reviewer !== 'SISTEMA' && order.reviewer !== 'SIN ASIGNAR';
 
   return (
-    <div onClick={onClick} className={`bg-white p-6 rounded-[40px] border-2 shadow-sm relative overflow-hidden cursor-pointer active:scale-[0.98] transition-all ${isGrouped ? 'border-teal-500/20 shadow-teal-100/30' : 'border-slate-100'}`}>
+    <div onClick={onClick} className="bg-white p-6 rounded-[40px] border-2 border-slate-100 shadow-sm relative overflow-hidden cursor-pointer active:scale-[0.98] transition-all">
       <div className="absolute top-4 right-4 flex flex-col items-end gap-1">
          <div className={`px-2 py-0.5 rounded-lg shadow-sm border ${hasReviewer ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>
            <span className="text-[7px] font-black uppercase truncate max-w-[80px] block">
