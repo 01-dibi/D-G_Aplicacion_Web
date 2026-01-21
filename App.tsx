@@ -1,15 +1,15 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
   ChevronRight, Menu, X, ArrowLeft, Loader2, 
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send, UserCircle2, UserPlus2, ShieldCheck, Users2
+  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send, UserCircle2, UserPlus2, ShieldCheck, Users2, FileText, Camera, Upload
 } from 'lucide-react';
 import { Order, OrderStatus, View, PackagingEntry } from './types';
 import { supabase, connectionStatus } from './supabaseClient';
-import { analyzeOrderText } from './geminiService';
+import { analyzeOrderText, analyzeOrderMedia } from './geminiService';
 
 export default function App() {
   const [isLandingMode, setIsLandingMode] = useState(true);
@@ -473,7 +473,9 @@ function NewOrderForm({ onAdd, onBack, isSaving }: any) {
   const [aiText, setAiText] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [useAi, setUseAi] = useState(false);
-  
+  const [aiTab, setAiTab] = useState<'text' | 'visual'>('text');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const processAi = async () => {
     if(!aiText) return;
     setIsAiLoading(true);
@@ -489,6 +491,47 @@ function NewOrderForm({ onAdd, onBack, isSaving }: any) {
       alert("No se pudo analizar el texto.");
     }
     setIsAiLoading(false);
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsAiLoading(true);
+    try {
+      const base64 = await fileToBase64(file);
+      const mimeType = file.type;
+      const result = await analyzeOrderMedia(base64, mimeType);
+      
+      if (result) {
+        setForm({
+          ...form,
+          name: result.customerName?.toUpperCase() || '',
+          locality: result.locality?.toUpperCase() || ''
+        });
+        setUseAi(false);
+      } else {
+        alert("No se pudo analizar el archivo.");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Error al procesar el archivo.");
+    } finally {
+      setIsAiLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = error => reject(error);
+    });
   };
 
   const submit = () => {
@@ -515,22 +558,72 @@ function NewOrderForm({ onAdd, onBack, isSaving }: any) {
 
       {useAi ? (
         <div className="space-y-4 animate-in fade-in">
-          <div className="space-y-2">
-            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Pegar mensaje de WhatsApp</label>
-            <textarea 
-              className="w-full bg-slate-50 p-4 rounded-3xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-40 shadow-inner" 
-              placeholder="Hola, el pedido para Bazar Firmat..." 
-              value={aiText}
-              onChange={e => setAiText(e.target.value)}
-            />
+          <div className="flex bg-slate-100 p-1 rounded-2xl">
+            <button 
+              onClick={() => setAiTab('text')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${aiTab === 'text' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400'}`}
+            >
+              <MessageCircle size={14}/> Texto
+            </button>
+            <button 
+              onClick={() => setAiTab('visual')}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${aiTab === 'visual' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400'}`}
+            >
+              <Camera size={14}/> Visual
+            </button>
           </div>
-          <button 
-            disabled={isAiLoading || !aiText}
-            onClick={processAi}
-            className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
-          >
-            {isAiLoading ? <Loader2 className="animate-spin" size={14}/> : <><Sparkles size={14}/> ANALIZAR TEXTO</>}
-          </button>
+
+          {aiTab === 'text' ? (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Pegar mensaje de WhatsApp</label>
+                <textarea 
+                  className="w-full bg-slate-50 p-4 rounded-3xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-40 shadow-inner" 
+                  placeholder="Hola, el pedido para Bazar Firmat..." 
+                  value={aiText}
+                  onChange={e => setAiText(e.target.value)}
+                />
+              </div>
+              <button 
+                disabled={isAiLoading || !aiText}
+                onClick={processAi}
+                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+              >
+                {isAiLoading ? <Loader2 className="animate-spin" size={14}/> : <><Sparkles size={14}/> ANALIZAR TEXTO</>}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div 
+                onClick={() => !isAiLoading && fileInputRef.current?.click()}
+                className="w-full h-40 bg-slate-50 border-2 border-dashed border-slate-200 rounded-[32px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-slate-100 transition-all group"
+              >
+                {isAiLoading ? (
+                  <Loader2 className="animate-spin text-orange-500" size={32} />
+                ) : (
+                  <>
+                    <div className="w-12 h-12 bg-orange-100 text-orange-500 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Upload size={24}/>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-800">Cargar Foto o PDF</p>
+                      <p className="text-[8px] font-bold text-slate-400 mt-1">REMITOS, LISTAS O CAPTURAS</p>
+                    </div>
+                  </>
+                )}
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  className="hidden" 
+                  accept="image/*,application/pdf"
+                  onChange={handleFileUpload}
+                />
+              </div>
+              <p className="text-[8px] text-center text-slate-400 font-bold italic uppercase px-4 leading-relaxed">
+                La IA analizará el documento para extraer la Razón Social y la Localidad automáticamente.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4 animate-in fade-in">
