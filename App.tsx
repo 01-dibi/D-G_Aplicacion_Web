@@ -575,33 +575,70 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
       <div className="bg-white w-full max-w-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
         <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors z-10"><X/></button>
         
-        {/* Responsable Badge en el Modal */}
-        <div className="absolute top-8 right-16 flex items-center gap-2">
-           <div className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-2xl shadow-lg border border-indigo-400">
-             <UserCircle2 size={12} className="opacity-80" />
-             <span className="text-[9px] font-black uppercase tracking-tighter max-w-[120px] truncate">{order.reviewer || 'SIN ASIGNAR'}</span>
-             <button 
-               onClick={(e) => { e.stopPropagation(); onAddCollaborator(); }}
-               className="ml-1 w-5 h-5 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center transition-all active:scale-90"
-             >
-               <Plus size={12} strokeWidth={3} />
-             </button>
-           </div>
-        </div>
-
-        <div className="mb-6 flex flex-col items-start gap-1 mt-6">
-          <div className="flex items-center gap-2 relative">
-            <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+        {/* Cabecera Reorganizada */}
+        <div className="mb-6 flex flex-col w-full">
+          {/* Fila 1: Etiqueta de Origen (un poco más arriba) */}
+          <div className="-mt-2 mb-2">
+            <span className={`text-[7px] font-black px-2 py-0.5 rounded-full uppercase tracking-[0.2em] ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
               {order.source === 'IA' ? 'INTELIGENCIA ARTIFICIAL' : 'MANUAL'}
             </span>
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] font-black text-emerald-600 uppercase tracking-tighter bg-emerald-50 px-2 py-0.5 rounded-md">
-                ORDEN {orderNumbers}
-              </span>
-              <button onClick={() => setShowOrderPicker(!showOrderPicker)} className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg"><Plus size={12}/></button>
+          </div>
+
+          {/* Fila 2: Metadatos (Orden + Colaboradores) */}
+          <div className="flex items-center justify-between w-full gap-2">
+            {/* Lado Izquierdo: Número de Orden */}
+            <div className="flex items-center gap-1 relative">
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-black text-emerald-600 uppercase tracking-tighter bg-emerald-50 px-2 py-1.5 rounded-md border border-emerald-100">
+                  ORDEN {orderNumbers}
+                </span>
+                <button 
+                  onClick={() => setShowOrderPicker(!showOrderPicker)} 
+                  className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-all active:scale-90"
+                  title="Añadir número de orden"
+                >
+                  <Plus size={10} strokeWidth={3}/>
+                </button>
+              </div>
+
+              {showOrderPicker && (
+                <div className="absolute left-0 top-full mt-2 bg-white border-2 border-emerald-100 p-3 rounded-2xl shadow-xl z-50 w-56 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <h5 className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-2">Pedidos Relacionados</h5>
+                  <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
+                    {otherOrdersSameCustomer.length > 0 ? otherOrdersSameCustomer.map((o: any) => (
+                      <button 
+                        key={o.id}
+                        onClick={() => selectOtherOrder(o.orderNumber)}
+                        className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-emerald-50 rounded-xl flex justify-between items-center"
+                      >
+                        #{o.orderNumber} <span className="text-[8px] opacity-40">{o.status}</span>
+                      </button>
+                    )) : (
+                      <p className="text-[8px] italic text-slate-300 p-2 text-center">Sin otros pedidos para este cliente</p>
+                    )}
+                  </div>
+                  <button onClick={manualAddOrderNumber} className="w-full mt-2 py-2 text-[8px] font-black text-emerald-600 uppercase border-t border-slate-50 hover:bg-slate-50">+ Ingreso Manual</button>
+                </div>
+              )}
+            </div>
+
+            {/* Lado Derecho: Colaboradores */}
+            <div className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-2xl shadow-lg border border-indigo-400 max-w-[50%]">
+              <UserCircle2 size={12} className="shrink-0 opacity-80" />
+              <span className="text-[9px] font-black uppercase tracking-tighter truncate">{order.reviewer || 'SIN ASIGNAR'}</span>
+              <button 
+                onClick={(e) => { e.stopPropagation(); onAddCollaborator(); }}
+                className="shrink-0 ml-1 w-5 h-5 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center transition-all active:scale-90"
+                title="Añadir colaborador"
+              >
+                <Plus size={10} strokeWidth={3} />
+              </button>
             </div>
           </div>
-          <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic pr-8 mt-2 uppercase">{order.customerName}</h2>
+
+          {/* Fila 3: Nombre del Cliente */}
+          <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic mt-4 uppercase break-words">{order.customerName}</h2>
+          
           <div className="mt-3 flex items-center gap-3 bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 w-full shadow-inner">
             <UserCircle2 size={20} className="text-slate-400" />
             <div className="flex flex-col flex-1">
