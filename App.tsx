@@ -793,7 +793,7 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
 
   return (
     <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[700] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
+      <div className="bg-white w-full max-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
         <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors z-10"><X/></button>
         
         <div className="mb-6 flex flex-col w-full">
@@ -877,13 +877,35 @@ function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWh
                 {!isArchived && (
                   <div className="bg-white/70 p-4 rounded-[28px] border-2 border-dashed border-slate-200 space-y-3">
                     <div className="grid grid-cols-2 gap-2">
-                      <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase" value={newPackage.deposit} onChange={e=>setNewPackage({...newPackage, deposit: e.target.value})}>
-                        <option value="Dep. E">Dep. E</option><option value="Dep. F:">Dep. F:</option><option value="Dep. D1:">Dep. D1:</option>
-                        <option value="Dep. D2:">Dep. D2:</option><option value="Dep. A1:">Dep. A1:</option><option value="Otros:">Otros:</option>
-                      </select>
-                      <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase" value={newPackage.type} onChange={e=>setNewPackage({...newPackage, type: e.target.value})}>
-                        <option value="Caja">Caja</option><option value="Pack">Pack</option><option value="Bolsa">Bolsa</option><option value="Otro">Otro...</option>
-                      </select>
+                      <div className="space-y-1">
+                        <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase" value={newPackage.deposit} onChange={e=>setNewPackage({...newPackage, deposit: e.target.value})}>
+                          <option value="Dep. E">Dep. E</option><option value="Dep. F:">Dep. F:</option><option value="Dep. D1:">Dep. D1:</option>
+                          <option value="Dep. D2:">Dep. D2:</option><option value="Dep. A1:">Dep. A1:</option><option value="Otros:">Otros:</option>
+                        </select>
+                        {newPackage.deposit === 'Otros:' && (
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[9px] font-bold uppercase outline-none focus:border-emerald-500 animate-in fade-in slide-in-from-top-1" 
+                            placeholder="Especifique depósito..."
+                            value={newPackage.customDeposit}
+                            onChange={e => setNewPackage({...newPackage, customDeposit: e.target.value})}
+                          />
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase" value={newPackage.type} onChange={e=>setNewPackage({...newPackage, type: e.target.value})}>
+                          <option value="Caja">Caja</option><option value="Pack">Pack</option><option value="Bolsa">Bolsa</option><option value="Otro">Otro...</option>
+                        </select>
+                        {newPackage.type === 'Otro' && (
+                          <input 
+                            type="text" 
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-[9px] font-bold uppercase outline-none focus:border-emerald-500 animate-in fade-in slide-in-from-top-1" 
+                            placeholder="Especifique tipo..."
+                            value={newPackage.customType}
+                            onChange={e => setNewPackage({...newPackage, customType: e.target.value})}
+                          />
+                        )}
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <input type="number" className="w-16 bg-white border border-slate-100 rounded-xl p-2 text-xs font-black" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
