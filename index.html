@@ -1,12 +1,18 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0f172a">
+    
+    <!-- iOS support -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-title" content="D&G Log">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2850/2850389.png">
+
+    <link rel="manifest" href="/manifest.json">
     <title>D&G Logística - Gestión de Pedidos</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -42,5 +48,14 @@
 <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.log('SW registration failed: ', err);
+          });
+        });
+      }
+    </script>
 </body>
 </html>
