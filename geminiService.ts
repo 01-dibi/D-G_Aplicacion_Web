@@ -1,34 +1,12 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 
-const getApiKey = () => {
-  let key = '';
-  try {
-    // @ts-ignore
-    key = (typeof process !== 'undefined' && process.env && process.env.API_KEY) || '';
-    if (!key) {
-      // @ts-ignore
-      key = (import.meta && import.meta.env && import.meta.env.VITE_API_KEY) || '';
-    }
-    if (!key && typeof window !== 'undefined') {
-      // @ts-ignore
-      key = window.API_KEY || '';
-    }
-  } catch (e) {
-    console.error("Error obteniendo API_KEY:", e);
-  }
-  return key;
-};
+// Always initialize with the direct environment variable as per guidelines.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Función para analizar texto (WhatsApp)
 export async function analyzeOrderText(text: string) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    console.error("Falta API_KEY para Gemini");
-    return null;
-  }
-
   try {
-    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Analiza el siguiente texto de un pedido. EXTRAE ÚNICAMENTE el nombre del cliente y la localidad. 
@@ -57,14 +35,7 @@ export async function analyzeOrderText(text: string) {
 
 // Función para analizar fotos o PDFs
 export async function analyzeOrderMedia(base64Data: string, mimeType: string) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    console.error("Falta API_KEY para Gemini Media");
-    return null;
-  }
-
   try {
-    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: {
