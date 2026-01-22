@@ -7,9 +7,9 @@ import {
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
   Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send, UserCircle2, UserPlus2, ShieldCheck, Users2, FileText, Camera, Upload
 } from 'lucide-react';
-import { Order, OrderStatus, View, PackagingEntry } from './types';
-import { supabase, connectionStatus } from './supabaseClient';
-import { analyzeOrderText, analyzeOrderMedia } from './geminiService';
+import { Order, OrderStatus, View, PackagingEntry } from './types.ts';
+import { supabase, connectionStatus } from './supabaseClient.ts';
+import { analyzeOrderText, analyzeOrderMedia } from './geminiService.ts';
 
 export default function App() {
   const [isLandingMode, setIsLandingMode] = useState(true);

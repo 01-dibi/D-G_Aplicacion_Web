@@ -1,14 +1,30 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
+const getApiKey = () => {
+  let key = '';
+  try {
+    // @ts-ignore
+    key = (typeof process !== 'undefined' && process.env && process.env.API_KEY) || '';
+    if (!key) {
+      // @ts-ignore
+      key = (import.meta && import.meta.env && import.meta.env.VITE_API_KEY) || '';
+    }
+  } catch (e) {
+    console.error("Error obteniendo API_KEY:", e);
+  }
+  return key;
+};
+
 // Función para analizar texto (WhatsApp)
 export async function analyzeOrderText(text: string) {
-  if (!process.env.API_KEY) {
-    console.error("Falta API_KEY");
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    console.error("Falta API_KEY para Gemini");
     return null;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `Analiza el siguiente texto de un pedido. EXTRAE ÚNICAMENTE el nombre del cliente y la localidad. 
@@ -35,15 +51,16 @@ export async function analyzeOrderText(text: string) {
   }
 }
 
-// Nueva función para analizar fotos o PDFs
+// Función para analizar fotos o PDFs
 export async function analyzeOrderMedia(base64Data: string, mimeType: string) {
-  if (!process.env.API_KEY) {
-    console.error("Falta API_KEY");
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    console.error("Falta API_KEY para Gemini Media");
     return null;
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: {
@@ -55,7 +72,7 @@ export async function analyzeOrderMedia(base64Data: string, mimeType: string) {
             }
           },
           {
-            text: "Analiza esta imagen o documento de un pedido. Extrae el nombre del cliente (razón social) y la localidad. Ignora los productos."
+            text: "Analiza esta imagen o documento de un pedido. Extrae el nombre del cliente (razón social) y la localidad. Ignora los productos e información irrelevante."
           }
         ]
       },
