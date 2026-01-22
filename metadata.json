@@ -1,7 +1,8 @@
 {
-  "name": "D&G_Aplicacion_Web",
-  "description": "Aplicación profesional para la gestión de pedidos desde su recepción hasta el despacho, con integración de IA para análisis de texto y notificaciones de WhatsApp.",
+  "name": "D&G_Logistica_Pro",
+  "description": "Versión 2.0 - Inteligencia de Última Milla con Mapas, Firma Digital y Prueba de Entrega.",
   "requestFramePermissions": [
-    "camera"
+    "camera",
+    "geolocation"
   ]
 }

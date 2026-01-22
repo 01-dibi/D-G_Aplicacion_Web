@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
@@ -5,9 +6,9 @@ import {
   History, Trash2, PlusSquare, MapPin, 
   Plus, Check, LogOut, MessageCircle, 
   Activity, Layers, Package, Lock, AlertTriangle, RefreshCcw,
-  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send, UserCircle2, UserPlus2, ShieldCheck, Users2, FileText, Camera, Upload
+  Database, ServerCrash, Copy, Terminal, Info, ShieldAlert, Wifi, WifiOff, Settings, ExternalLink, HelpCircle, AlertCircle, Sparkles, Send, UserCircle2, UserPlus2, ShieldCheck, Users2, FileText, Camera, Upload, Map as MapIcon, PenTool, Navigation, Edit3, Save, RotateCcw, Stepper, UserCheck, Eraser
 } from 'lucide-react';
-import { Order, OrderStatus, View, PackagingEntry } from './types.ts';
+import { Order, OrderStatus, View, PackagingEntry, DeliveryData } from './types.ts';
 import { supabase, connectionStatus } from './supabaseClient.ts';
 import { analyzeOrderText, analyzeOrderMedia } from './geminiService.ts';
 
@@ -21,8 +22,23 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
-  const [dbError, setDbError] = useState<{message: string, code?: string} | null>(null);
+  const [deliveryOrder, setDeliveryOrder] = useState<Order | null>(null);
+  const [dbStatus, setDbStatus] = useState<'online' | 'offline' | 'checking'>('checking');
   
+  const [carriers, setCarriers] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('dg_carriers');
+      return saved ? JSON.parse(saved) : ["PROPIO", "JUAN CAMIÓN", "LOGÍSTICA FIRMAT"];
+    } catch (e) {
+      return ["PROPIO"];
+    }
+  });
+
+  const saveCarriers = (newCarriers: string[]) => {
+    setCarriers(newCarriers);
+    localStorage.setItem('dg_carriers', JSON.stringify(newCarriers));
+  };
+
   const [currentUser, setCurrentUser] = useState<{ name: string } | null>(() => {
     try {
       const saved = localStorage.getItem('dg_user');
@@ -35,8 +51,10 @@ export default function App() {
   const [orders, setOrders] = useState<Order[]>([]);
 
   const fetchOrders = async () => {
+    setDbStatus('checking');
     if (!connectionStatus.isConfigured) {
       setIsLoading(false);
+      setDbStatus('offline');
       return;
     }
     
@@ -60,10 +78,12 @@ export default function App() {
         source: o.source,
         carrier: o.carrier,
         detailedPackaging: o.detailed_packaging || [],
-        createdAt: o.created_at
+        createdAt: o.created_at,
+        deliveryData: o.delivery_data
       }));
 
       setOrders(mappedData);
+      setDbStatus('online');
       
       if (selectedOrder) {
         const updated = mappedData.find(o => o.id === selectedOrder.id);
@@ -71,7 +91,7 @@ export default function App() {
       }
     } catch (error: any) {
       console.error("Fetch Error:", error);
-      setDbError({ message: error.message, code: error.code });
+      setDbStatus('offline');
     } finally {
       setIsLoading(false);
     }
@@ -81,31 +101,10 @@ export default function App() {
     if (currentUser) {
       setIsLandingMode(false);
       fetchOrders();
-
-      const channel = supabase
-        .channel('schema-db-changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'orders' },
-          () => {
-            fetchOrders();
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      const channel = supabase.channel('schema-db-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders()).subscribe();
+      return () => { supabase.removeChannel(channel); };
     } else {
       setIsLoading(false);
-    }
-  }, [currentUser]);
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem('dg_user', JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem('dg_user');
     }
   }, [currentUser]);
 
@@ -142,126 +141,66 @@ export default function App() {
         detailed_packaging: updatedOrder.detailedPackaging,
         customer_number: updatedOrder.customerNumber,
         order_number: updatedOrder.orderNumber,
-        reviewer: updatedOrder.reviewer
+        customer_name: updatedOrder.customerName,
+        locality: updatedOrder.locality,
+        reviewer: updatedOrder.reviewer,
+        delivery_data: updatedOrder.deliveryData
       }).eq('id', updatedOrder.id);
       
       if (error) throw error;
       await fetchOrders();
+      return true;
     } catch (err: any) {
-      console.error("Update failed:", err);
       alert(`❌ ERROR: ${err.message}`);
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleAddCollaborator = async (order: Order) => {
-    const newName = prompt("Ingrese el nombre del colaborador a añadir:");
-    if (newName && newName.trim()) {
-      const updatedReviewer = order.reviewer 
-        ? `${order.reviewer} + ${newName.trim().toUpperCase()}` 
-        : newName.trim().toUpperCase();
-      
-      await handleUpdateOrder({ ...order, reviewer: updatedReviewer });
-    }
-  };
+  const handlePurgeOrders = async () => {
+    if (!confirm("⚠️ ATENCIÓN: Se eliminarán permanentemente todos los pedidos en 'EN DESPACHO' y 'HISTORIAL'. ¿Deseas continuar?")) return;
+    if (!confirm("🚨 SEGUNDA CONFIRMACIÓN: Esta acción NO se puede deshacer. Los bultos y datos de firma se perderán para estos registros. ¿Estás seguro?")) return;
 
-  const handleDeleteOrder = async (id: string) => {
-    if (!confirm("¿Deseas eliminar este pedido definitivamente?")) return;
-    const { error } = await supabase.from('orders').delete().eq('id', id);
-    if (error) alert("Error: " + error.message);
-    setSelectedOrder(null);
-    fetchOrders();
-  };
-
-  const handleAddOrder = async (newOrderData: Partial<Order>) => {
-    setDbError(null);
     setIsSaving(true);
     try {
-      const payload = {
-        order_number: newOrderData.orderNumber,
-        customer_number: String(newOrderData.customerNumber),
-        customer_name: newOrderData.customerName,
-        locality: newOrderData.locality || 'GENERAL',
-        status: OrderStatus.PENDING,
-        notes: newOrderData.notes || '',
-        reviewer: currentUser?.name?.toUpperCase() || 'SISTEMA',
-        source: newOrderData.source || 'Manual'
-      };
-
-      const { error } = await supabase.from('orders').insert([payload]);
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .in('status', [OrderStatus.DISPATCHED, OrderStatus.ARCHIVED]);
+      
       if (error) throw error;
-
-      setIsNewOrderModalOpen(false);
-      setView('PENDING');
+      alert("✅ Limpieza completada. El sistema está listo para nuevas cargas.");
+      setView('DASHBOARD');
       await fetchOrders();
     } catch (err: any) {
-      setDbError({ message: err.message, code: err.code });
-      alert(`❌ ERROR: ${err.message}`);
+      alert("Error al purgar datos: " + err.message);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const sendWhatsApp = (order: Order, customPackaging?: PackagingEntry[], customCarrier?: string) => {
-    const bultos = customPackaging || order.detailedPackaging || [];
-    const totalBultos = bultos.reduce((acc, p) => acc + (p.quantity || 0), 0);
-    const carrier = customCarrier || order.carrier || 'A DESIGNAR';
-    
-    const statusMap = {
-      [OrderStatus.PENDING]: 'PENDIENTE',
-      [OrderStatus.COMPLETED]: 'EN PREPARACIÓN',
-      [OrderStatus.DISPATCHED]: 'EN DESPACHO',
-      [OrderStatus.ARCHIVED]: 'ENTREGADO'
-    };
-
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('es-AR');
-    const timeStr = now.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-    const bultosText = bultos.length > 0 
-      ? bultos.map(p => `* ${p.quantity} ${p.type.toUpperCase()} (${p.deposit.replace('Dep. ', '').replace(':', '').trim()})`).join('%0A')
-      : '* Sin bultos registrados';
-
-    const msg = `📦 *D&G LOGISTICA*%0A📍 ${order.locality}, #${order.orderNumber} | *${order.customerName}*%0A--------------------------%0A${bultosText}%0ATotal: ${totalBultos} bultos%0A--------------------------%0A👤 ${order.reviewer || 'SISTEMA'} | ✍️ ${currentUser?.name}%0A🚚 ${carrier}%0A--------------------------%0AESTADO: ${statusMap[order.status]}%0A--------------------------%0A${dateStr} - ${timeStr}`;
-    
-    window.open(`https://wa.me/?text=${msg}`, '_blank');
+  const handleDeliveryComplete = async (orderId: string, deliveryData: DeliveryData) => {
+    setIsSaving(true);
+    try {
+      const { error } = await supabase.from('orders').update({
+        status: OrderStatus.ARCHIVED,
+        delivery_data: deliveryData
+      }).eq('id', orderId);
+      if (error) throw error;
+      setDeliveryOrder(null);
+      await fetchOrders();
+      setView('ALL');
+    } catch (err: any) {
+      alert("Error al finalizar entrega: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const sendGeneralSupportWhatsApp = () => {
-    const phone = "543465404527";
-    const msg = encodeURIComponent(`Hola, necesito ayuda con una consulta de pedido en D&G Logística.`);
-    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
-  };
-
-  if (isLandingMode) {
-    return (
-      <LandingScreen 
-        onSelectStaff={() => { setIsLandingMode(false); setIsCustomerMode(false); }} 
-        onSelectCustomer={() => { setIsLandingMode(false); setIsCustomerMode(true); }} 
-      />
-    );
-  }
-
-  if (isCustomerMode) {
-    return (
-      <CustomerPortal 
-        onBack={() => setIsLandingMode(true)} 
-        orders={orders} 
-        onWhatsApp={sendWhatsApp} 
-        onSupportWhatsApp={sendGeneralSupportWhatsApp} 
-      />
-    );
-  }
-
-  if (!currentUser) {
-    return (
-      <LoginModal 
-        onLogin={u => setCurrentUser(u)} 
-        onBack={() => setIsLandingMode(true)} 
-      />
-    );
-  }
+  if (isLandingMode) return <LandingScreen onSelectStaff={() => { setIsLandingMode(false); setIsCustomerMode(false); }} onSelectCustomer={() => { setIsLandingMode(false); setIsCustomerMode(true); }} />;
+  if (isCustomerMode) return <CustomerPortal onBack={() => setIsLandingMode(true)} orders={orders} />;
+  if (!currentUser) return <LoginModal onLogin={u => setCurrentUser(u)} onBack={() => setIsLandingMode(true)} />;
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-24 font-sans relative overflow-x-hidden">
@@ -272,23 +211,31 @@ export default function App() {
             <div className="p-8 bg-slate-900 text-white">
               <h1 className="text-2xl font-black italic mb-6">D&G <span className="text-orange-500">Logística</span></h1>
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center font-bold">{currentUser.name[0]}</div>
-                <p className="font-bold text-sm">{currentUser.name}</p>
+                <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center font-bold uppercase">{currentUser.name[0]}</div>
+                <div className="flex flex-col">
+                   <p className="font-bold text-sm leading-none">{currentUser.name}</p>
+                   <p className="text-[8px] uppercase tracking-widest text-orange-400 mt-1">Admin Access</p>
+                </div>
               </div>
             </div>
             <nav className="flex-1 p-4 space-y-1">
               <SidebarItem icon={<LayoutDashboard size={20}/>} label="Dashboard" active={view === 'DASHBOARD'} onClick={() => { setView('DASHBOARD'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<MapIcon size={20}/>} label="Mapa de Entregas" active={view === 'MAP'} onClick={() => { setView('MAP'); setIsSidebarOpen(false); }} />
               <div className="h-px bg-slate-100 my-4" />
               <SidebarItem icon={<ClipboardList size={20}/>} label="Pendientes" active={view === 'PENDING'} onClick={() => { setView('PENDING'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<CheckCircle2 size={20}/>} label="Preparados" active={view === 'COMPLETED'} onClick={() => { setView('COMPLETED'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<Truck size={20}/>} label="En Despacho" active={view === 'DISPATCHED'} onClick={() => { setView('DISPATCHED'); setIsSidebarOpen(false); }} />
               <div className="h-px bg-slate-100 my-4" />
-              <SidebarItem icon={<PlusSquare size={20}/>} label="CARGA DE ENVÍO" onClick={() => { setIsNewOrderModalOpen(true); setIsSidebarOpen(false); }} />
-              <SidebarItem icon={<Activity size={20}/>} label="Seguimiento" active={view === 'TRACKING'} onClick={() => { setView('TRACKING'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<Users2 size={20}/>} label="Gestionar Choferes" active={view === 'CARRIERS'} onClick={() => { setView('CARRIERS'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<Eraser size={20}/>} label="Limpieza Sistema" active={view === 'MAINTENANCE'} onClick={() => { setView('MAINTENANCE'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<PlusSquare size={20}/>} label="NUEVA CARGA" onClick={() => { setIsNewOrderModalOpen(true); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<History size={20}/>} label="Historial" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
             </nav>
-            <div className="p-4 border-t mt-auto">
-               <SidebarItem icon={<LogOut size={20}/>} label="Salir" onClick={() => setCurrentUser(null)} danger />
+            <div className="p-4 border-t mt-auto flex flex-col gap-2">
+               <button onClick={fetchOrders} className="w-full flex items-center gap-3 p-3 text-slate-400 hover:text-indigo-600 text-xs font-bold uppercase tracking-widest">
+                 <RefreshCcw size={16} className={dbStatus === 'checking' ? 'animate-spin' : ''}/> Forzar Sincronización
+               </button>
+               <SidebarItem icon={<LogOut size={20}/>} label="Cerrar Sesión" onClick={() => setCurrentUser(null)} danger />
             </div>
           </div>
         </div>
@@ -298,93 +245,76 @@ export default function App() {
         <button onClick={() => setIsSidebarOpen(true)} className="p-2 bg-white/10 rounded-xl"><Menu size={20} /></button>
         <div className="flex flex-col items-center">
           <h1 className="text-lg font-black tracking-tighter uppercase italic leading-none">D&G <span className="text-orange-500">Logistics</span></h1>
-          <div className="flex items-center gap-1 mt-1">
-            <span className="flex items-center gap-1 text-[7px] font-black text-emerald-400 uppercase tracking-widest animate-pulse"><Wifi size={8}/> LIVE CLOUD</span>
+          <div className="flex items-center gap-1 mt-1 text-[7px] font-black uppercase tracking-widest">
+            {dbStatus === 'online' ? (
+              <span className="text-emerald-400 flex items-center gap-1"><Wifi size={8}/> LIVE CLOUD 2.1</span>
+            ) : dbStatus === 'checking' ? (
+              <span className="text-orange-400 animate-pulse">Sincronizando...</span>
+            ) : (
+              <span className="text-red-400 flex items-center gap-1"><WifiOff size={8}/> OFFLINE MODE</span>
+            )}
           </div>
         </div>
-        <div className="w-10 h-10 bg-teal-500 rounded-2xl flex items-center justify-center font-bold shadow-lg shadow-teal-500/20">{currentUser.name[0]}</div>
+        <div className="w-10 h-10 bg-teal-500 rounded-2xl flex items-center justify-center font-bold shadow-lg shadow-teal-500/20 uppercase transition-all active:scale-90" onClick={fetchOrders}>{currentUser.name[0]}</div>
       </header>
 
       <main className="p-5 space-y-6">
-        {isLoading && !isSaving && (
-          <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4">
-            <Loader2 className="animate-spin" size={32} />
-            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Sincronizando con equipo...</p>
-          </div>
-        )}
+        {isLoading && <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-4"><Loader2 className="animate-spin" size={32} /><p className="text-[10px] font-black uppercase tracking-[0.2em]">Cargando Logística...</p></div>}
 
         {!isLoading && view === 'DASHBOARD' && (
           <div className="space-y-6 animate-in fade-in duration-500">
             <div className="grid grid-cols-2 gap-4">
               <StatCard count={stats.pending} label="Pendientes" color="bg-orange-500" icon={<ClipboardList />} onClick={() => setView('PENDING')} />
               <StatCard count={stats.completed} label="Preparados" color="bg-emerald-600" icon={<CheckCircle2 />} onClick={() => setView('COMPLETED')} />
-              <StatCard count={stats.dispatched} label="En Despacho" color="bg-indigo-600" icon={<Truck />} onClick={() => setView('DISPATCHED')} />
+              <StatCard count={stats.dispatched} label="En Ruta" color="bg-indigo-600" icon={<Truck />} onClick={() => setView('DISPATCHED')} />
               <StatCard count={stats.total} label="Histórico" color="bg-slate-700" icon={<History />} onClick={() => setView('ALL')} />
             </div>
             
-            <button 
-              onClick={() => setIsNewOrderModalOpen(true)}
-              className="w-full bg-slate-900 text-white p-7 rounded-[40px] flex items-center gap-4 shadow-xl active:scale-[0.98] transition-all relative overflow-hidden group"
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-orange-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-              <div className="w-14 h-14 bg-white/10 text-orange-500 rounded-2xl flex items-center justify-center">
-                <PlusSquare size={28} />
-              </div>
+            <button onClick={() => setView('MAP')} className="w-full bg-indigo-50 border-2 border-indigo-100 text-indigo-900 p-6 rounded-[35px] flex items-center gap-4 shadow-sm active:scale-95 transition-all group">
+              <div className="w-12 h-12 bg-indigo-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/20 group-hover:scale-110 transition-transform"><MapIcon size={24}/></div>
               <div className="text-left">
-                <h4 className="font-black uppercase tracking-tighter text-base">CARGA DE ENVÍO</h4>
-                <p className="text-[11px] font-bold opacity-60 italic">Ingresar nuevo pedido manual o IA</p>
+                <h4 className="font-black uppercase tracking-tighter text-sm">Visualizar en Mapa</h4>
+                <p className="text-[10px] font-bold opacity-60">Navegación GPS Real</p>
               </div>
-              <ChevronRight className="ml-auto opacity-50" />
             </button>
           </div>
+        )}
+
+        {!isLoading && view === 'MAP' && <MapView orders={orders} onBack={() => setView('DASHBOARD')} onSelectOrder={setSelectedOrder} />}
+        {!isLoading && view === 'CARRIERS' && <CarrierManager carriers={carriers} onUpdate={saveCarriers} onBack={() => setView('DASHBOARD')} />}
+        {!isLoading && view === 'MAINTENANCE' && (
+          <MaintenancePanel 
+            onPurge={handlePurgeOrders} 
+            isSaving={isSaving} 
+            stats={stats} 
+            onBack={() => setView('DASHBOARD')} 
+          />
         )}
 
         {!isLoading && (view === 'PENDING' || view === 'COMPLETED' || view === 'DISPATCHED' || view === 'ALL') && (
           <div className="space-y-4 animate-in slide-in-from-bottom duration-300">
             <div className="flex items-center justify-between">
-              <button onClick={() => setView('DASHBOARD')} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest"><ArrowLeft size={14}/> Dashboard</button>
+              <button onClick={() => setView('DASHBOARD')} className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-indigo-600 transition-colors"><ArrowLeft size={14}/> Dashboard</button>
               <h2 className="font-black text-xs text-slate-500 uppercase tracking-widest">{view === 'ALL' ? 'Historial' : view}</h2>
             </div>
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-              <input 
-                type="text" 
-                placeholder="Buscar por cliente, ciudad o N°..." 
-                className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none focus:border-teal-500 transition-all shadow-sm"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+              <input type="text" placeholder="Buscar pedidos..." className="w-full bg-white border-2 border-slate-100 rounded-[24px] py-4 pl-12 text-sm font-bold outline-none focus:border-teal-500 transition-all shadow-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
             <div className="space-y-3">
               {filteredOrders.length > 0 ? filteredOrders.map(order => (
-                <OrderCard 
-                  key={order.id} 
-                  order={order} 
-                  onClick={() => setSelectedOrder(order)} 
-                  allOrders={orders} 
-                />
-              )) : (
-                <div className="text-center py-20 opacity-20 flex flex-col items-center">
-                   <Package size={64} className="mb-4" />
-                   <p className="text-xs font-black uppercase tracking-widest italic">Sin pedidos en esta sección</p>
-                </div>
-              )}
+                <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} />
+              )) : <div className="text-center py-20 opacity-20 flex flex-col items-center"><Package size={64} /><p className="text-xs font-black uppercase tracking-widest mt-4">Sin resultados</p></div>}
             </div>
           </div>
         )}
-
-        {view === 'TRACKING' && <TrackingInternalView orders={orders} onBack={() => setView('DASHBOARD')} onSelectOrder={setSelectedOrder} />}
       </main>
 
       {isNewOrderModalOpen && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[600] flex items-center justify-center p-5">
-          <div className="bg-white w-full max-md rounded-[48px] p-8 shadow-2xl relative overflow-hidden animate-in zoom-in duration-200 max-h-[90vh] overflow-y-auto">
-            <button onClick={() => setIsNewOrderModalOpen(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-900 transition-colors"><X/></button>
-            <NewOrderForm 
-              onAdd={handleAddOrder} 
-              onBack={() => setIsNewOrderModalOpen(false)} 
-              isSaving={isSaving}
-            />
+          <div className="bg-white w-full max-md rounded-[48px] p-8 shadow-2xl relative overflow-y-auto max-h-[90vh]">
+            <button onClick={() => setIsNewOrderModalOpen(false)} className="absolute top-6 right-6 p-2 text-slate-400 hover:bg-slate-50 rounded-full transition-colors"><X/></button>
+            <NewOrderForm onAdd={(d:any) => { handleUpdateOrder(d as Order); setIsNewOrderModalOpen(false); }} isSaving={isSaving} />
           </div>
         </div>
       )}
@@ -392,19 +322,25 @@ export default function App() {
       {selectedOrder && (
         <OrderDetailsModal 
           order={selectedOrder} 
-          allOrders={orders}
           onClose={() => setSelectedOrder(null)} 
           onUpdate={handleUpdateOrder}
-          onDelete={handleDeleteOrder}
-          onWhatsApp={(data: any) => sendWhatsApp(selectedOrder, data.packaging, data.carrier)}
-          onAddCollaborator={() => handleAddCollaborator(selectedOrder)}
+          onDeliver={() => { setDeliveryOrder(selectedOrder); setSelectedOrder(null); }}
           isSaving={isSaving}
+          availableCarriers={carriers}
+        />
+      )}
+
+      {deliveryOrder && (
+        <DeliveryWorkflowModal 
+          order={deliveryOrder} 
+          onClose={() => setDeliveryOrder(null)} 
+          onComplete={handleDeliveryComplete} 
         />
       )}
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t p-4 flex justify-around items-center max-w-md mx-auto rounded-t-[40px] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-40">
         <NavBtn icon={<LayoutDashboard />} active={view === 'DASHBOARD'} onClick={() => setView('DASHBOARD')} />
-        <NavBtn icon={<Activity />} active={view === 'TRACKING'} onClick={() => setView('TRACKING')} />
+        <NavBtn icon={<MapIcon />} active={view === 'MAP'} onClick={() => setView('MAP')} />
         <NavBtn icon={<ClipboardList />} active={view === 'PENDING'} onClick={() => setView('PENDING')} />
         <NavBtn icon={<Truck />} active={view === 'DISPATCHED'} onClick={() => setView('DISPATCHED')} />
       </nav>
@@ -412,753 +348,539 @@ export default function App() {
   );
 }
 
-function LandingScreen({ onSelectStaff, onSelectCustomer }: any) {
+// --- COMPONENTES ADICIONALES V2.1 + PURGE ---
+
+function MaintenancePanel({ onPurge, isSaving, stats, onBack }: any) {
   return (
-    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 z-[2000]">
-      <div className="w-full max-w-md space-y-12 animate-in fade-in zoom-in duration-700">
-        <div className="text-center space-y-4 mb-8">
-          <div className="inline-block p-6 bg-white/5 rounded-[48px] backdrop-blur-sm border border-white/10 shadow-2xl">
-            <h1 className="text-8xl font-black italic tracking-tighter leading-none text-white">D<span className="text-orange-500">&</span>G</h1>
+    <div className="space-y-8 animate-in slide-in-from-right duration-300">
+      <header className="flex items-center gap-4">
+        <button onClick={onBack} className="p-3 bg-white border rounded-2xl shadow-sm"><ArrowLeft/></button>
+        <h2 className="text-xl font-black italic uppercase">Mantenimiento</h2>
+      </header>
+
+      <div className="bg-white p-8 rounded-[48px] shadow-xl border-t-8 border-orange-500 space-y-6">
+        <div className="flex items-center gap-4 text-orange-600">
+          <AlertTriangle size={32}/>
+          <h3 className="font-black uppercase text-sm leading-tight">Zona de Operaciones Críticas</h3>
+        </div>
+        
+        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide leading-relaxed">
+          Usa estas herramientas para resetear el sistema al finalizar la jornada o ante errores masivos.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+             <span className="text-[8px] font-black text-slate-400 uppercase">En Despacho</span>
+             <p className="text-2xl font-black text-indigo-600">{stats.dispatched}</p>
           </div>
-          <div className="space-y-1">
-            <p className="text-[12px] font-black text-orange-500 uppercase tracking-[0.4em] italic">Logistics Intelligence</p>
-            <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.6em]">Warehousing Solutions</p>
+          <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
+             <span className="text-[8px] font-black text-slate-400 uppercase">Historial</span>
+             <p className="text-2xl font-black text-slate-700">{stats.total}</p>
           </div>
         </div>
+      </div>
 
-        <div className="space-y-6">
-          <button 
-            onClick={onSelectStaff}
-            className="group w-full bg-slate-900 border-2 border-indigo-500/30 text-white p-8 rounded-[40px] flex items-center gap-6 shadow-2xl active:scale-[0.97] transition-all hover:bg-slate-800"
-          >
-            <div className="w-16 h-16 bg-indigo-600 rounded-3xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-lg shadow-indigo-600/20">
-              <ShieldCheck size={32} />
-            </div>
-            <div className="text-left flex-1">
-              <h4 className="font-black uppercase tracking-tighter text-xl leading-none mb-1">ACCESO PERSONAL</h4>
-              <p className="text-[10px] font-bold opacity-40 uppercase tracking-widest italic">Área Operativa Restringida</p>
-            </div>
-            <ChevronRight className="opacity-30 group-hover:translate-x-1 transition-transform" />
-          </button>
+      <div className="space-y-4">
+        <button 
+          onClick={onPurge}
+          disabled={isSaving}
+          className="w-full bg-red-600 text-white p-8 rounded-[40px] flex items-center gap-6 shadow-2xl active:scale-95 transition-all disabled:opacity-50"
+        >
+          <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center shadow-lg">
+            {isSaving ? <Loader2 className="animate-spin" size={28}/> : <Trash2 size={28}/>}
+          </div>
+          <div className="text-left">
+            <h4 className="font-black uppercase text-lg leading-none mb-1">Purgar Sistema</h4>
+            <p className="text-[8px] opacity-70 uppercase tracking-widest font-black">Elimina Despachos e Historial</p>
+          </div>
+        </button>
 
-          <button 
-            onClick={onSelectCustomer}
-            className="group w-full bg-emerald-600 border-2 border-emerald-400/30 text-white p-8 rounded-[40px] flex items-center gap-6 shadow-2xl active:scale-[0.97] transition-all hover:bg-emerald-700"
-          >
-            <div className="w-16 h-16 bg-white/20 rounded-3xl flex items-center justify-center group-hover:scale-110 transition-transform">
-              <Search size={32} />
-            </div>
-            <div className="text-left flex-1">
-              <h4 className="font-black uppercase tracking-tighter text-xl leading-none mb-1">CONSULTA CLIENTES</h4>
-              <p className="text-[10px] font-bold opacity-70 uppercase tracking-widest italic">Seguimiento de Envíos</p>
-            </div>
-            <ChevronRight className="opacity-50 group-hover:translate-x-1 transition-transform" />
-          </button>
-        </div>
-
-        <div className="pt-12 text-center opacity-20">
-           <div className="flex items-center justify-center gap-3">
-              <div className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse"></div>
-              <span className="text-[8px] font-black text-white uppercase tracking-[0.8em]">Secure System v3.5</span>
-              <div className="w-1 h-1 bg-emerald-500 rounded-full animate-pulse"></div>
-           </div>
+        <div className="p-6 bg-indigo-50 rounded-[35px] border border-indigo-100 flex items-start gap-3">
+           <Info size={16} className="text-indigo-600 shrink-0 mt-1"/>
+           <p className="text-[9px] font-bold text-indigo-900/60 uppercase leading-relaxed">
+             Esto NO afectará a los pedidos PENDIENTES ni a los PREPARADOS. Solo limpia lo que ya salió del depósito o ya fue entregado.
+           </p>
         </div>
       </div>
     </div>
   );
 }
 
-function NewOrderForm({ onAdd, onBack, isSaving }: any) {
-  const [form, setForm] = useState({ orderNumber: '', nro: '', name: '', locality: '', notes: '' });
-  const [aiText, setAiText] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [useAi, setUseAi] = useState(false);
-  const [aiTab, setAiTab] = useState<'text' | 'visual'>('text');
-  const fileInputRef = useRef<HTMLInputElement>(null);
+function MapView({ orders, onBack, onSelectOrder }: any) {
+  const pendingOrders = orders.filter((o:any) => o.status !== OrderStatus.ARCHIVED);
+  const [activeOrder, setActiveOrder] = useState<any>(null);
 
-  const processAi = async () => {
-    if(!aiText) return;
-    setIsAiLoading(true);
-    const result = await analyzeOrderText(aiText);
-    if(result) {
-      setForm({
-        ...form,
-        name: result.customerName?.toUpperCase() || '',
-        locality: result.locality?.toUpperCase() || ''
-      });
-      setUseAi(false);
-    } else {
-      alert("No se pudo analizar el texto.");
-    }
-    setIsAiLoading(false);
+  const startNavigation = (order: any) => {
+    const address = encodeURIComponent(`${order.customerName}, ${order.locality}, Argentina`);
+    const url = `https://www.google.com/maps/search/?api=1&query=${address}`;
+    window.open(url, '_blank');
   };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsAiLoading(true);
-    try {
-      const base64 = await fileToBase64(file);
-      const mimeType = file.type;
-      const result = await analyzeOrderMedia(base64, mimeType);
+  
+  return (
+    <div className="space-y-4 animate-in fade-in duration-500 pb-10">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="p-3 bg-white border rounded-2xl hover:bg-slate-50 transition-colors shadow-sm"><ArrowLeft size={20}/></button>
+        <h2 className="text-xl font-black italic">Mapa de Ruta</h2>
+      </div>
       
-      if (result) {
-        setForm({
-          ...form,
-          name: result.customerName?.toUpperCase() || '',
-          locality: result.locality?.toUpperCase() || ''
-        });
-        setUseAi(false);
-      } else {
-        alert("No se pudo analizar el archivo.");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Error al procesar el archivo.");
-    } finally {
-      setIsAiLoading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64String = (reader.result as string).split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
-
-  const submit = () => {
-    if(!form.orderNumber || !form.name) return alert("Falta Nº Orden o Razón Social");
-    onAdd({
-      orderNumber: form.orderNumber.toUpperCase(),
-      customerNumber: form.nro,
-      customerName: form.name.toUpperCase(),
-      locality: form.locality.toUpperCase() || 'GENERAL',
-      notes: form.notes, 
-      source: aiText ? 'IA' : 'Manual'
-    });
-  };
-
-  return (
-    <div className="space-y-6 pb-4">
-      <div className="text-center">
-        <h2 className="font-black text-2xl uppercase italic tracking-tighter text-slate-800 leading-none">Carga de Envío</h2>
-        <div className="flex justify-center gap-4 mt-4">
-          <button onClick={() => setUseAi(false)} className={`text-[10px] font-black uppercase tracking-widest pb-1 border-b-2 transition-all ${!useAi ? 'border-orange-500 text-slate-800' : 'border-transparent text-slate-300'}`}>Manual</button>
-          <button onClick={() => setUseAi(true)} className={`text-[10px] font-black uppercase tracking-widest pb-1 border-b-2 transition-all flex items-center gap-1 ${useAi ? 'border-orange-500 text-slate-800' : 'border-transparent text-slate-300'}`}><Sparkles size={10}/> Con IA</button>
+      <div className="w-full h-80 bg-slate-200 rounded-[40px] relative overflow-hidden border-4 border-white shadow-xl">
+        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&w=1000')] opacity-30 bg-cover bg-center grayscale contrast-125"></div>
+        
+        {pendingOrders.slice(0, 6).map((o:any, i:number) => (
+          <div 
+            key={o.id}
+            onClick={() => setActiveOrder(o)}
+            className="absolute cursor-pointer animate-bounce transition-transform hover:scale-125 z-10"
+            style={{ top: `${15 + i*12}%`, left: `${25 + (i%3)*20}%` }}
+          >
+            <div className="relative">
+              <MapPin className={`${o.status === OrderStatus.PENDING ? 'text-orange-500' : 'text-indigo-600'} drop-shadow-lg`} size={36} fill="currentColor" fillOpacity={0.2} />
+              {activeOrder?.id === o.id && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-white p-3 rounded-2xl shadow-2xl border border-slate-100 min-w-[140px] animate-in zoom-in">
+                   <p className="text-[9px] font-black uppercase text-slate-800 leading-none truncate">{o.customerName}</p>
+                   <p className="text-[7px] font-bold text-slate-400 uppercase mt-1 mb-2">{o.locality}</p>
+                   <button onClick={() => startNavigation(o)} className="w-full bg-indigo-600 text-white text-[7px] font-black uppercase py-2 rounded-lg flex items-center justify-center gap-1"><Navigation size={10}/> Cómo llegar</button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        
+        <div className="absolute bottom-4 right-4 bg-white/80 backdrop-blur-md p-3 rounded-2xl shadow-lg border border-slate-100 flex items-center gap-2">
+          <div className="w-2 h-2 bg-emerald-500 rounded-full animate-ping"></div>
+          <span className="text-[9px] font-black uppercase tracking-widest text-slate-600">Seguimiento Real</span>
         </div>
       </div>
 
-      {useAi ? (
-        <div className="space-y-4 animate-in fade-in">
-          <div className="flex bg-slate-100 p-1 rounded-2xl">
-            <button 
-              onClick={() => setAiTab('text')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${aiTab === 'text' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400'}`}
-            >
-              <MessageCircle size={14}/> Texto
-            </button>
-            <button 
-              onClick={() => setAiTab('visual')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${aiTab === 'visual' ? 'bg-white shadow-sm text-slate-800' : 'text-slate-400'}`}
-            >
-              <Camera size={14}/> Visual
-            </button>
+      <div className="space-y-3">
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2">Próximas paradas</h3>
+        {pendingOrders.map((o:any) => (
+          <div key={o.id} className="bg-white p-4 rounded-3xl border border-slate-100 flex items-center gap-4 hover:border-indigo-200 transition-all group">
+             <div onClick={() => onSelectOrder(o)} className={`w-12 h-12 rounded-xl flex items-center justify-center transition-colors ${o.status === OrderStatus.PENDING ? 'bg-orange-50 text-orange-500' : 'bg-indigo-50 text-indigo-500'}`}>
+                <Package size={24}/>
+             </div>
+             <div onClick={() => onSelectOrder(o)} className="flex-1 overflow-hidden">
+                <h4 className="text-sm font-black italic truncate uppercase leading-none">{o.customerName}</h4>
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mt-1">{o.locality} • #{o.orderNumber}</p>
+             </div>
+             <button onClick={() => startNavigation(o)} className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl opacity-0 group-hover:opacity-100 transition-all hover:bg-indigo-600 hover:text-white"><Navigation size={18}/></button>
           </div>
-
-          {aiTab === 'text' ? (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Pegar mensaje de WhatsApp</label>
-                <textarea 
-                  className="w-full bg-slate-50 p-4 rounded-3xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-40 shadow-inner" 
-                  placeholder="Hola, el pedido para Bazar Firmat..." 
-                  value={aiText}
-                  onChange={e => setAiText(e.target.value)}
-                />
-              </div>
-              <button 
-                disabled={isAiLoading || !aiText}
-                onClick={processAi}
-                className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
-              >
-                {isAiLoading ? <Loader2 className="animate-spin" size={14}/> : <><Sparkles size={14}/> ANALIZAR TEXTO</>}
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div 
-                onClick={() => !isAiLoading && fileInputRef.current?.click()}
-                className="w-full h-40 bg-slate-50 border-2 border-dashed border-slate-200 rounded-[32px] flex flex-col items-center justify-center gap-3 cursor-pointer hover:bg-slate-100 transition-all group"
-              >
-                {isAiLoading ? (
-                  <Loader2 className="animate-spin text-orange-500" size={32} />
-                ) : (
-                  <>
-                    <div className="w-12 h-12 bg-orange-100 text-orange-500 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Upload size={24}/>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-800">Cargar Foto o PDF</p>
-                      <p className="text-[8px] font-bold text-slate-400 mt-1">REMITOS, LISTAS O CAPTURAS</p>
-                    </div>
-                  </>
-                )}
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  accept="image/*,application/pdf"
-                  onChange={handleFileUpload}
-                />
-              </div>
-              <p className="text-[8px] text-center text-slate-400 font-bold italic uppercase px-4 leading-relaxed">
-                La IA analizará el documento para extraer la Razón Social y la Localidad automáticamente.
-              </p>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4 animate-in fade-in">
-          <Input label="N° DE ORDEN" value={form.orderNumber} onChange={(v:string)=>setForm({...form, orderNumber: v})} placeholder="Ej: 5542" />
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Nº de Cliente" value={form.nro} onChange={(v:string)=>setForm({...form, nro: v})} placeholder="1450" />
-            <Input label="Localidad" value={form.locality} onChange={(v:string)=>setForm({...form, locality: v})} placeholder="FIRMAT" />
-          </div>
-          <Input label="Razón Social" value={form.name} onChange={(v:string)=>setForm({...form, name: v})} placeholder="Nombre del Comercio" />
-          <div className="space-y-2">
-            <label className="text-[9px] font-black text-slate-400 uppercase ml-2 tracking-widest">Observaciones</label>
-            <textarea className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold border-2 border-transparent focus:border-teal-500 outline-none h-24 shadow-inner" value={form.notes} onChange={e=>setForm({...form, notes: e.target.value})} placeholder="Instrucciones adicionales..." />
-          </div>
-        </div>
-      )}
-
-      <button 
-        disabled={isSaving || (useAi && isAiLoading)}
-        onClick={submit} 
-        className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
-      >
-        {isSaving ? <Loader2 className="animate-spin" size={18}/> : 'CONFIRMAR INGRESO'}
-      </button>
+        ))}
+      </div>
     </div>
   );
 }
 
-function OrderDetailsModal({ order, allOrders, onClose, onUpdate, onDelete, onWhatsApp, onAddCollaborator, isSaving }: any) {
-  const [carrierCategory, setCarrierCategory] = useState('');
-  const [carrierSubDetail, setCarrierSubDetail] = useState('');
-  const [customCarrier, setCustomCarrier] = useState('');
-  const [customerNumber, setCustomerNumber] = useState(order.customerNumber || '');
-  const [orderNumbers, setOrderNumbers] = useState(order.orderNumber || '');
-  const [packaging, setPackaging] = useState<PackagingEntry[]>(order.detailedPackaging || []);
-  const [showOrderPicker, setShowOrderPicker] = useState(false);
-  const [newPackage, setNewPackage] = useState({ 
-    type: 'Caja', 
-    quantity: 1, 
-    deposit: 'Dep. D1:', 
-    customType: '',
-    customDeposit: ''
-  });
+function CarrierManager({ carriers, onUpdate, onBack }: any) {
+  const [newCarrier, setNewCarrier] = useState('');
 
+  const addCarrier = () => {
+    if (newCarrier.trim()) {
+      onUpdate([...carriers, newCarrier.trim().toUpperCase()]);
+      setNewCarrier('');
+    }
+  };
+
+  const removeCarrier = (idx: number) => {
+    onUpdate(carriers.filter((_: any, i: number) => i !== idx));
+  };
+
+  return (
+    <div className="space-y-6 animate-in slide-in-from-right duration-300">
+      <header className="flex items-center gap-4">
+        <button onClick={onBack} className="p-3 bg-white border rounded-2xl shadow-sm"><ArrowLeft/></button>
+        <h2 className="text-xl font-black italic uppercase">Gestión de Choferes</h2>
+      </header>
+
+      <div className="bg-white p-8 rounded-[48px] shadow-xl space-y-4">
+        <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest leading-relaxed">Configura los nombres de los transportistas para asignar entregas rápidamente.</p>
+        <div className="flex gap-2">
+           <input className="flex-1 bg-slate-50 p-5 rounded-3xl outline-none font-black text-sm uppercase border-2 border-transparent focus:border-indigo-500 transition-all" placeholder="Nombre Chofer..." value={newCarrier} onChange={e=>setNewCarrier(e.target.value)} onKeyDown={e=>e.key === 'Enter' && addCarrier()} />
+           <button onClick={addCarrier} className="p-5 bg-indigo-600 text-white rounded-3xl shadow-lg active:scale-95 transition-all"><Plus/></button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+         {carriers.map((c: string, i: number) => (
+           <div key={i} className="bg-white p-5 rounded-3xl border border-slate-100 flex justify-between items-center group hover:border-red-100 transition-all">
+              <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center font-black">{c[0]}</div>
+                 <span className="font-black text-slate-700 uppercase italic text-sm">{c}</span>
+              </div>
+              <button onClick={() => removeCarrier(i)} className="p-3 text-slate-200 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+           </div>
+         ))}
+      </div>
+    </div>
+  );
+}
+
+function OrderDetailsModal({ order, onClose, onUpdate, onDeliver, isSaving, availableCarriers }: any) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDispatching, setIsDispatching] = useState(false);
+  const [selectedCarrier, setSelectedCarrier] = useState(order.carrier || availableCarriers[0] || "");
+  const [editedOrder, setEditedOrder] = useState({...order});
+  
+  const totalBultos = order.detailedPackaging?.reduce((acc: any, p: any) => acc + (p.quantity || 0), 0) || 0;
+  const isDispatched = order.status === OrderStatus.DISPATCHED;
   const isArchived = order.status === OrderStatus.ARCHIVED;
-  const viaNames = ["MATÍAS", "NICOLÁS"];
-  const vendNames = ["MAURO", "GUSTAVO"];
 
-  useEffect(() => {
-    if (order.carrier) {
-      const carrierStr = String(order.carrier).toUpperCase();
-      if (carrierStr.startsWith('VIAJANTE:')) {
-        setCarrierCategory('Viajantes');
-        setCarrierSubDetail(carrierStr.replace('VIAJANTE: ', ''));
-      } else if (carrierStr.startsWith('VENDEDOR:')) {
-        setCarrierCategory('Vendedores');
-        setCarrierSubDetail(carrierStr.replace('VENDEDOR: ', ''));
-      } else if (carrierStr.startsWith('TRANSPORTE:')) {
-        setCarrierCategory('Transporte');
-        setCustomCarrier(carrierStr.replace('TRANSPORTE: ', ''));
-      } else if (carrierStr.startsWith('RETIRO PERSONAL:')) {
-        setCarrierCategory('Retiro Personal');
-        setCustomCarrier(carrierStr.replace('RETIRO PERSONAL: ', ''));
-      } else {
-        setCarrierCategory('');
-        setCustomCarrier(carrierStr);
-      }
+  const handleSaveChanges = async () => {
+    const success = await onUpdate(editedOrder);
+    if (success) setIsEditing(false);
+  };
+
+  const handleRevertStatus = async () => {
+    if (confirm("¿Seguro que quieres revertir este pedido a estado PENDIENTE?")) {
+       await onUpdate({...order, status: OrderStatus.PENDING, deliveryData: null});
+       onClose();
     }
-  }, [order.carrier]);
-
-  const otherOrdersSameCustomer = useMemo(() => {
-    return (allOrders || []).filter((o: any) => 
-      o.customerNumber === customerNumber && 
-      o.id !== order.id && 
-      !orderNumbers.includes(o.orderNumber)
-    );
-  }, [allOrders, customerNumber, order.id, orderNumbers]);
-
-  const addPackage = () => {
-    if (isArchived) return;
-    const finalType = newPackage.type === 'Otro' ? newPackage.customType : newPackage.type;
-    const finalDeposit = newPackage.deposit === 'Otros:' ? newPackage.customDeposit : newPackage.deposit;
-    if (!finalType || !finalDeposit) return alert("Completa los datos del bulto");
-
-    const entry = { 
-      id: Date.now().toString(), 
-      type: finalType.toUpperCase(), 
-      quantity: newPackage.quantity, 
-      deposit: finalDeposit.toUpperCase() 
-    };
-    setPackaging([...packaging, entry]);
-    setNewPackage({ ...newPackage, customType: '', customDeposit: '' });
   };
 
-  const removePackage = (id: string) => {
-    if (isArchived) return;
-    setPackaging(packaging.filter(p => p.id !== id));
-  };
-
-  const getFinalCarrier = () => {
-    let finalCarrier = '';
-    if (carrierCategory === 'Viajantes') {
-      finalCarrier = `VIAJANTE: ${carrierSubDetail.toUpperCase()}`;
-    } else if (carrierCategory === 'Vendedores') {
-      finalCarrier = `VENDEDOR: ${carrierSubDetail.toUpperCase()}`;
-    } else if (carrierCategory === 'Transporte') {
-      finalCarrier = `TRANSPORTE: ${customCarrier.toUpperCase()}`;
-    } else if (carrierCategory === 'Retiro Personal') {
-      finalCarrier = `RETIRO PERSONAL: ${customCarrier.toUpperCase()}`;
-    } else {
-      finalCarrier = customCarrier.toUpperCase();
+  const confirmDispatch = async () => {
+    if (!selectedCarrier) {
+      alert("Debes seleccionar un chofer");
+      return;
     }
-    return finalCarrier;
-  };
-
-  const saveDetails = async () => {
-    if (isArchived) return;
-    await onUpdate({ 
-      ...order, 
-      detailedPackaging: packaging, 
-      carrier: getFinalCarrier(),
-      customerNumber,
-      orderNumber: orderNumbers
-    });
-  };
-
-  const handleNotifyWhatsApp = () => {
-    onWhatsApp({
-      packaging: packaging,
-      carrier: getFinalCarrier()
-    });
-  };
-
-  const selectOtherOrder = (num: string) => {
-    if (isArchived) return;
-    setOrderNumbers(prev => prev ? `${prev}, ${num}` : num);
-    setShowOrderPicker(false);
-  };
-
-  const manualAddOrderNumber = () => {
-    if (isArchived) return;
-    const next = prompt("Ingrese nuevo número de orden:");
-    if (next) {
-      setOrderNumbers(prev => prev ? `${prev}, ${next.toUpperCase()}` : next.toUpperCase());
-    }
-    setShowOrderPicker(false);
-  };
-
-  const totalBultos = packaging.reduce((acc, p) => acc + (p.quantity || 0), 0);
-
-  const advanceStage = async () => {
-    if (isArchived) return;
-    const stages = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
-    const nextIdx = stages.indexOf(order.status) + 1;
-    
-    if (nextIdx < stages.length) {
-      await onUpdate({ 
-        ...order, 
-        detailedPackaging: packaging, 
-        carrier: getFinalCarrier(),
-        customerNumber,
-        orderNumber: orderNumbers,
-        status: stages[nextIdx]
-      });
-      onClose();
-    }
+    await onUpdate({...order, status: OrderStatus.DISPATCHED, carrier: selectedCarrier});
+    setIsDispatching(false);
   };
 
   return (
     <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl z-[700] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300 overflow-y-auto max-h-[92vh]">
-        <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-slate-900 transition-colors z-10"><X/></button>
-        
-        <div className="mb-6 flex flex-col w-full">
-          <div className="-mt-2 mb-2 flex items-center gap-2">
-            <span className={`text-[7px] font-black px-2 py-0.5 rounded-full uppercase tracking-[0.2em] ${order.source === 'IA' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-              {order.source === 'IA' ? 'INTELIGENCIA ARTIFICIAL' : 'MANUAL'}
-            </span>
-            {isArchived && (
-              <span className="text-[7px] font-black px-2 py-0.5 rounded-full uppercase tracking-[0.2em] bg-slate-900 text-white">HISTORIAL - SOLO LECTURA</span>
-            )}
-          </div>
+      <div className="bg-white w-full max-md rounded-[56px] p-8 shadow-2xl relative overflow-y-auto max-h-[92vh]">
+        <div className="absolute top-8 right-8 flex gap-2">
+           {!isEditing && !isDispatching && <button onClick={() => setIsEditing(true)} className="p-2 text-slate-400 hover:text-indigo-600 transition-colors"><Edit3 size={20}/></button>}
+           <button onClick={onClose} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><X size={20}/></button>
+        </div>
 
-          <div className="flex items-center justify-between w-full gap-2">
-            <div className="flex items-center gap-1 relative">
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-black text-emerald-600 uppercase tracking-tighter bg-emerald-50 px-2 py-1.5 rounded-md border border-emerald-100">
-                  ORDEN {orderNumbers}
-                </span>
-                {!isArchived && (
-                  <button onClick={() => setShowOrderPicker(!showOrderPicker)} className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg hover:bg-emerald-200 transition-all active:scale-95">
-                    <Plus size={10} strokeWidth={3}/>
-                  </button>
-                )}
+        {isEditing ? (
+          <div className="space-y-6 pt-8 animate-in zoom-in duration-200">
+            <h2 className="text-xl font-black uppercase italic text-slate-400 mb-4">Modo Edición Maestra</h2>
+            <div className="space-y-4">
+               <div><label className="text-[8px] font-black uppercase text-slate-400 ml-2">Nombre Cliente</label><input className="w-full bg-slate-50 p-4 rounded-2xl font-black outline-none border-2 border-indigo-200 uppercase" value={editedOrder.customerName} onChange={e=>setEditedOrder({...editedOrder, customerName: e.target.value})} /></div>
+               <div><label className="text-[8px] font-black uppercase text-slate-400 ml-2">Localidad</label><input className="w-full bg-slate-50 p-4 rounded-2xl font-black outline-none border-2 border-indigo-200 uppercase" value={editedOrder.locality} onChange={e=>setEditedOrder({...editedOrder, locality: e.target.value})} /></div>
+               <div className="grid grid-cols-2 gap-4">
+                  <div><label className="text-[8px] font-black uppercase text-slate-400 ml-2">Nº Orden</label><input className="w-full bg-slate-50 p-4 rounded-2xl font-black outline-none border-2 border-indigo-200 uppercase" value={editedOrder.orderNumber} onChange={e=>setEditedOrder({...editedOrder, orderNumber: e.target.value})} /></div>
+                  <div><label className="text-[8px] font-black uppercase text-slate-400 ml-2">Transporte</label><input className="w-full bg-slate-50 p-4 rounded-2xl font-black outline-none border-2 border-indigo-200 uppercase" value={editedOrder.carrier || ''} onChange={e=>setEditedOrder({...editedOrder, carrier: e.target.value})} /></div>
+               </div>
+            </div>
+            <div className="flex gap-2">
+               <button onClick={() => setIsEditing(false)} className="flex-1 bg-slate-100 text-slate-500 py-4 rounded-2xl font-black uppercase text-[10px]">Cancelar</button>
+               <button onClick={handleSaveChanges} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2"><Save size={14}/> Guardar</button>
+            </div>
+            <button onClick={handleRevertStatus} className="w-full bg-red-50 text-red-500 py-3 rounded-2xl font-black uppercase text-[8px] flex items-center justify-center gap-2 mt-4"><RotateCcw size={12}/> Resetear a Pendiente</button>
+          </div>
+        ) : isDispatching ? (
+          <div className="space-y-8 pt-10 animate-in slide-in-from-bottom duration-300 text-center">
+             <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-[30px] flex items-center justify-center mx-auto shadow-lg"><UserCheck size={40}/></div>
+             <div>
+                <h3 className="text-2xl font-black italic uppercase leading-none">Asignar Entrega</h3>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-2">Selecciona un chofer para despachar</p>
+             </div>
+             <div className="space-y-3 max-h-60 overflow-y-auto pr-2 no-scrollbar">
+                {availableCarriers.map((c: string) => (
+                   <button key={c} onClick={() => setSelectedCarrier(c)} className={`w-full p-6 rounded-[28px] font-black uppercase text-sm border-2 transition-all ${selectedCarrier === c ? 'bg-indigo-600 text-white border-indigo-600 shadow-xl' : 'bg-slate-50 text-slate-400 border-transparent hover:border-slate-200'}`}>
+                      {c}
+                   </button>
+                ))}
+                {availableCarriers.length === 0 && <p className="text-red-500 text-[10px] font-black uppercase">No hay choferes configurados</p>}
+             </div>
+             <div className="flex gap-3">
+                <button onClick={() => setIsDispatching(false)} className="flex-1 py-5 text-[10px] font-black uppercase text-slate-400">Volver</button>
+                <button onClick={confirmDispatch} disabled={!selectedCarrier} className="flex-[2] bg-indigo-600 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all disabled:opacity-30">Confirmar Despacho</button>
+             </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col items-center text-center mt-4">
+               <h2 className="text-3xl font-black text-slate-800 italic uppercase leading-[0.8] tracking-tighter">{order.customerName}</h2>
+               <div className="flex items-center gap-2 text-[10px] font-black text-indigo-600 uppercase tracking-widest mt-4">
+                  <MapPin size={12}/> {order.locality}
+               </div>
+            </div>
+            
+            <div className="mt-8 grid grid-cols-2 gap-4">
+               <div className="bg-slate-50 p-5 rounded-[30px] border border-slate-100 flex flex-col items-center">
+                  <span className="text-[8px] font-black text-slate-400 uppercase mb-1">Orden Nº</span>
+                  <span className="text-xl font-black text-slate-700 italic">#{order.orderNumber}</span>
+               </div>
+               <div className="bg-slate-50 p-5 rounded-[30px] border border-slate-100 flex flex-col items-center">
+                  <span className="text-[8px] font-black text-slate-400 uppercase mb-1">Bultos</span>
+                  <span className="text-xl font-black text-slate-700 italic">{totalBultos}</span>
+               </div>
+            </div>
+
+            <div className="mt-6 p-6 bg-slate-50/50 rounded-[40px] border border-slate-100 space-y-3">
+               <span className="text-[10px] font-black text-slate-400 uppercase px-2">Composición del Envío</span>
+               {order.detailedPackaging?.map((p:any) => (
+                 <div key={p.id} className="bg-white p-4 rounded-3xl flex justify-between items-center shadow-sm">
+                   <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center font-black text-xs">{p.quantity}</div>
+                      <span className="text-[10px] font-black uppercase text-slate-700">{p.type}</span>
+                   </div>
+                   <span className="text-[8px] font-black text-slate-300 uppercase">{p.deposit}</span>
+                 </div>
+               ))}
+            </div>
+
+            {isArchived && order.deliveryData && (
+              <div className="mt-6 p-6 bg-emerald-50 rounded-[40px] border border-emerald-100 space-y-4">
+                <h4 className="text-[10px] font-black text-emerald-700 uppercase flex items-center gap-2"><ShieldCheck size={14}/> Certificado Final</h4>
+                <div className="flex gap-4">
+                  {order.deliveryData.photo && <img src={order.deliveryData.photo} className="w-20 h-20 rounded-2xl object-cover border-2 border-white shadow-sm" />}
+                  {order.deliveryData.signature && <img src={order.deliveryData.signature} className="w-20 h-20 rounded-2xl object-contain bg-white border-2 border-white shadow-sm" />}
+                </div>
+                <div className="flex flex-col gap-1">
+                   <p className="text-[8px] font-black text-emerald-600 uppercase italic">Entregado: {new Date(order.deliveryData.deliveredAt).toLocaleString()}</p>
+                   {order.carrier && <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Chofer: {order.carrier}</p>}
+                </div>
               </div>
-              {showOrderPicker && !isArchived && (
-                <div className="absolute left-0 top-full mt-2 bg-white border-2 border-emerald-100 p-3 rounded-2xl shadow-xl z-50 w-56 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <h5 className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-2">Pedidos Relacionados</h5>
-                  <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
-                    {otherOrdersSameCustomer.length > 0 ? otherOrdersSameCustomer.map((o: any) => (
-                      <button key={o.id} onClick={() => selectOtherOrder(o.orderNumber)} className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-emerald-50 rounded-xl flex justify-between items-center">
-                        #{o.orderNumber} <span className="text-[8px] opacity-40">{o.status}</span>
-                      </button>
-                    )) : (
-                      <p className="text-[8px] italic text-slate-300 p-2 text-center">Sin otros pedidos para este cliente</p>
-                    )}
-                  </div>
-                  <button onClick={manualAddOrderNumber} className="w-full mt-2 py-2 text-[8px] font-black text-emerald-600 uppercase border-t border-slate-50 hover:bg-slate-50">+ Ingreso Manual</button>
+            )}
+
+            <div className="mt-10 space-y-3">
+              {isDispatched && (
+                <div className="flex flex-col gap-3">
+                   <button onClick={() => {
+                     const address = encodeURIComponent(`${order.customerName}, ${order.locality}, Argentina`);
+                     window.open(`https://www.google.com/maps/search/?api=1&query=${address}`, '_blank');
+                   }} className="w-full bg-indigo-50 text-indigo-600 py-4 rounded-[28px] font-black uppercase text-[10px] flex items-center justify-center gap-2 border-2 border-indigo-100 active:scale-95 transition-all">
+                      <Navigation size={14}/> Abrir GPS
+                   </button>
+                   <button onClick={onDeliver} className="w-full bg-emerald-600 text-white py-6 rounded-[32px] font-black uppercase text-xs shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-all">
+                     <CheckCircle2 size={20}/> Realizar Entrega PoD
+                   </button>
                 </div>
               )}
-            </div>
-
-            <div className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-2xl shadow-lg border border-indigo-400 max-w-[50%]">
-              <UserCircle2 size={12} className="shrink-0 opacity-80" />
-              <span className="text-[9px] font-black uppercase tracking-tighter truncate">{order.reviewer || 'SIN ASIGNAR'}</span>
-              {!isArchived && (
-                <button onClick={(e) => { e.stopPropagation(); onAddCollaborator(); }} className="shrink-0 ml-1 w-5 h-5 bg-white/20 hover:bg-white/40 rounded-full flex items-center justify-center transition-all active:scale-95">
-                  <Plus size={10} strokeWidth={3} />
+              
+              {!isArchived && !isDispatched && (
+                <button disabled={isSaving} onClick={() => setIsDispatching(true)} className="w-full bg-slate-900 text-white py-6 rounded-[32px] font-black uppercase text-xs shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-all">
+                  {isSaving ? <Loader2 className="animate-spin"/> : 'Despachar a Chofer'} <Truck size={18}/>
                 </button>
               )}
+
+              <button onClick={onClose} className="w-full py-4 text-[9px] font-black text-slate-300 uppercase tracking-[0.2em] hover:text-slate-600 transition-colors">Cerrar</button>
             </div>
-          </div>
-
-          <h2 className="text-3xl font-black text-slate-800 leading-[0.9] italic mt-4 uppercase break-words">{order.customerName}</h2>
-          
-          <div className="mt-3 flex items-center gap-3 bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 w-full shadow-inner">
-            <UserCircle2 size={20} className="text-slate-400" />
-            <div className="flex flex-col flex-1">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-[0.2em]">N° CLIENTE</span>
-              <input type="text" className={`bg-transparent text-lg font-black text-slate-900 outline-none w-full ${isArchived ? 'opacity-60 cursor-not-allowed' : ''}`} value={customerNumber} onChange={e => setCustomerNumber(e.target.value)} disabled={isArchived} />
-            </div>
-          </div>
-          <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase mt-3"><MapPin size={10} className="text-orange-500" /> {order.locality}</div>
-        </div>
-
-        <div className="space-y-4 mb-8">
-           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
-              <div className="flex justify-between items-center mb-5">
-                <h4 className="text-[10px] font-black text-slate-800 uppercase tracking-widest">Gestión de Bultos</h4>
-                <div className="bg-emerald-500 px-3 py-1 rounded-full"><span className="text-xs font-black text-white">{totalBultos} bultos</span></div>
-              </div>
-              <div className="space-y-2">
-                {packaging.map(p => (
-                  <div key={p.id} className="flex items-center justify-between bg-white p-3 rounded-2xl border border-slate-100 shadow-sm">
-                     <div className="flex flex-col">
-                        <span className="text-xs font-black text-slate-700 uppercase">{p.quantity} x {p.type}</span>
-                        <span className="text-[8px] font-black text-emerald-600 uppercase">DEPÓSITO {p.deposit}</span>
-                     </div>
-                     {!isArchived && <button onClick={() => removePackage(p.id)} className="text-red-300 hover:text-red-500"><Trash2 size={16}/></button>}
-                  </div>
-                ))}
-                {!isArchived && (
-                  <div className="bg-white/70 p-4 rounded-[28px] border-2 border-dashed border-slate-200 space-y-3">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none" value={newPackage.deposit} onChange={e=>setNewPackage({...newPackage, deposit: e.target.value})}>
-                          <option value="Dep. E">Dep. E</option><option value="Dep. F:">Dep. F:</option><option value="Dep. D1:">Dep. D1:</option>
-                          <option value="Dep. D2:">Dep. D2:</option><option value="Dep. A1:">Dep. A1:</option><option value="Otros:">Otros:</option>
-                        </select>
-                        {newPackage.deposit === 'Otros:' && (
-                          <input 
-                            type="text" 
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-[9px] font-bold uppercase outline-none focus:border-emerald-500 animate-in fade-in slide-in-from-top-1" 
-                            placeholder="Especifique depósito..."
-                            value={newPackage.customDeposit}
-                            onChange={e => setNewPackage({...newPackage, customDeposit: e.target.value})}
-                          />
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <select className="w-full bg-white border border-slate-100 rounded-xl p-2 text-[10px] font-black uppercase outline-none" value={newPackage.type} onChange={e=>setNewPackage({...newPackage, type: e.target.value})}>
-                          <option value="Caja">Caja</option><option value="Pack">Pack</option><option value="Bolsa">Bolsa</option><option value="Otro">Otro...</option>
-                        </select>
-                        {newPackage.type === 'Otro' && (
-                          <input 
-                            type="text" 
-                            className="w-full bg-white border border-slate-200 rounded-lg p-2 text-[9px] font-bold uppercase outline-none focus:border-emerald-500 animate-in fade-in slide-in-from-top-1" 
-                            placeholder="Especifique tipo..."
-                            value={newPackage.customType}
-                            onChange={e => setNewPackage({...newPackage, customType: e.target.value})}
-                          />
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <input type="number" className="w-16 bg-white border border-slate-100 rounded-xl p-2 text-xs font-black" value={newPackage.quantity} onChange={e=>setNewPackage({...newPackage, quantity: parseInt(e.target.value)})}/>
-                      <button onClick={addPackage} className="flex-1 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase transition-all active:scale-95"><Plus size={14} className="inline"/> AÑADIR</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-           </div>
-
-           <div className="p-6 bg-indigo-50/40 rounded-[32px] border border-indigo-100/50 space-y-4">
-              <h4 className="text-[10px] font-black text-indigo-900 uppercase">Sistema de Despacho</h4>
-              <div className="space-y-3">
-                <select 
-                  className={`w-full bg-white border-2 border-indigo-100 rounded-2xl p-4 text-xs font-black uppercase outline-none ${isArchived ? 'opacity-60 cursor-not-allowed' : ''}`} 
-                  value={carrierCategory} 
-                  onChange={e => {
-                    setCarrierCategory(e.target.value);
-                    setCarrierSubDetail('');
-                    setCustomCarrier('');
-                  }} 
-                  disabled={isArchived}
-                >
-                  <option value="">Seleccione Categoría...</option>
-                  <option value="Viajantes">Viajantes</option>
-                  <option value="Vendedores">Vendedores</option>
-                  <option value="Transporte">Transporte</option>
-                  <option value="Retiro Personal">Retiro Personal</option>
-                </select>
-
-                {carrierCategory === 'Viajantes' && (
-                  <select 
-                    className={`w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-bold uppercase outline-none animate-in slide-in-from-top-2 duration-200 ${isArchived ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    value={carrierSubDetail}
-                    onChange={e => setCarrierSubDetail(e.target.value)}
-                    disabled={isArchived}
-                  >
-                    <option value="">Seleccione Viajante...</option>
-                    {viaNames.map(name => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                )}
-
-                {carrierCategory === 'Vendedores' && (
-                  <select 
-                    className={`w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-bold uppercase outline-none animate-in slide-in-from-top-2 duration-200 ${isArchived ? 'opacity-60 cursor-not-allowed' : ''}`}
-                    value={carrierSubDetail}
-                    onChange={e => setCarrierSubDetail(e.target.value)}
-                    disabled={isArchived}
-                  >
-                    <option value="">Seleccione Vendedor...</option>
-                    {vendNames.map(name => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                )}
-
-                {(carrierCategory === 'Transporte' || carrierCategory === 'Retiro Personal') && (
-                  <input 
-                    className={`w-full bg-white border-2 border-indigo-200 rounded-2xl p-4 text-xs font-bold uppercase outline-none animate-in slide-in-from-top-2 duration-200 ${isArchived ? 'opacity-60 cursor-not-allowed' : ''}`} 
-                    placeholder={carrierCategory === 'Transporte' ? "Nombre del Transporte..." : "Persona que retira..."}
-                    value={customCarrier} 
-                    onChange={e => setCustomCarrier(e.target.value)} 
-                    disabled={isArchived}
-                  />
-                )}
-              </div>
-           </div>
-
-           <div className="p-6 bg-slate-50 rounded-[32px] border border-slate-100">
-             <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Instrucciones Logísticas</span>
-             <p className="text-xs font-bold text-slate-800 mt-2 leading-relaxed italic">{order.notes || "Sin instrucciones"}</p>
-           </div>
-        </div>
-
-        <div className="space-y-3 pt-6 border-t border-slate-50">
-          {!isArchived && (
-            <>
-              <button disabled={isSaving} onClick={advanceStage} className="w-full bg-slate-900 text-white py-6 rounded-[32px] font-black uppercase text-xs shadow-2xl flex items-center justify-center gap-3 active:scale-95 transition-all">
-                {isSaving ? <Loader2 className="animate-spin"/> : 'Avanzar de Etapa'} <ChevronRight size={18}/>
-              </button>
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <button onClick={() => onDelete(order.id)} className="py-4 bg-red-50 text-red-500 rounded-[20px] text-[10px] font-black uppercase active:bg-red-100 transition-all">Eliminar</button>
-                <button onClick={saveDetails} className="py-4 bg-teal-50 text-teal-600 rounded-[20px] text-[10px] font-black uppercase active:bg-teal-100 transition-all">Guardar</button>
-              </div>
-            </>
-          )}
-          <button onClick={handleNotifyWhatsApp} className="w-full bg-emerald-500 text-white py-5 rounded-[28px] font-black uppercase text-[11px] mt-6 flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all border-b-4 border-emerald-600">
-            <MessageCircle size={20}/> Notificar WhatsApp
-          </button>
-          {isArchived && <button onClick={onClose} className="w-full py-4 bg-slate-100 text-slate-400 rounded-[20px] text-[9px] font-black uppercase mt-3 tracking-widest active:bg-slate-200 transition-all">Cerrar Visualización</button>}
-        </div>
+          </>
+        )}
       </div>
     </div>
-  );
-}
-
-function SidebarItem({ icon, label, active, onClick, danger }: any) {
-  return (
-    <button onClick={onClick} className={`w-full flex items-center gap-4 p-4 rounded-2xl font-bold text-sm transition-all ${active ? 'bg-teal-50 text-teal-600' : danger ? 'text-red-500 hover:bg-red-50' : 'text-slate-600 hover:bg-slate-50'}`}>
-      {icon}<span>{label}</span>
-    </button>
   );
 }
 
 function StatCard({ count, label, color, icon, onClick }: any) {
   return (
-    <button onClick={onClick} className={`${color} p-6 rounded-[35px] text-white flex flex-col justify-between h-44 text-left shadow-xl active:scale-95 transition-all overflow-hidden relative`}>
-      <div className="absolute -right-4 -top-4 opacity-10">{React.cloneElement(icon as React.ReactElement, { size: 100 } as any)}</div>
-      <div className="bg-white/20 w-10 h-10 rounded-2xl flex items-center justify-center">{React.cloneElement(icon as React.ReactElement, { size: 20 } as any)}</div>
-      <div><h3 className="text-4xl font-black mb-1">{count}</h3><p className="text-[10px] font-black uppercase opacity-80">{label}</p></div>
+    <button onClick={onClick} className={`${color} p-6 rounded-[35px] text-white flex flex-col justify-between h-44 text-left shadow-xl active:scale-95 transition-all overflow-hidden relative group`}>
+      <div className="absolute -right-4 -top-4 opacity-10 group-hover:scale-125 transition-transform duration-500">{React.cloneElement(icon as React.ReactElement, { size: 100 } as any)}</div>
+      <div className="bg-white/20 w-10 h-10 rounded-2xl flex items-center justify-center backdrop-blur-md">{React.cloneElement(icon as React.ReactElement, { size: 20 } as any)}</div>
+      <div><h3 className="text-4xl font-black mb-1 leading-none">{count}</h3><p className="text-[9px] font-black uppercase opacity-70 tracking-widest">{label}</p></div>
     </button>
   );
 }
 
 function NavBtn({ icon, active, onClick }: any) {
   return (
-    <button onClick={onClick} className={`p-4 rounded-2xl transition-all relative ${active ? 'text-teal-600 bg-teal-50' : 'text-slate-300'}`}>
+    <button onClick={onClick} className={`p-4 rounded-2xl transition-all relative ${active ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-300 hover:text-slate-500'}`}>
       {React.cloneElement(icon, { size: 24 } as any)}
-      {active && <span className="absolute bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 bg-teal-600 rounded-full"></span>}
+      {active && <span className="absolute bottom-2 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-indigo-600 rounded-full animate-bounce"></span>}
     </button>
   );
 }
 
-function Input({ label, value, onChange, placeholder }: any) {
+function SidebarItem({ icon, label, active, onClick, danger }: any) {
   return (
-    <div className="space-y-2">
-      <label className="text-[9px] font-black text-slate-400 uppercase ml-2">{label}</label>
-      <input className="w-full bg-slate-50 p-4 rounded-2xl text-xs font-bold outline-none border-2 border-transparent focus:border-teal-500 uppercase shadow-inner" value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} />
-    </div>
+    <button onClick={onClick} className={`w-full flex items-center gap-4 p-4 rounded-2xl font-bold text-sm transition-all ${active ? 'bg-indigo-50 text-indigo-600' : danger ? 'text-red-500 hover:bg-red-50' : 'text-slate-600 hover:bg-slate-50'}`}>
+      {icon}<span>{label}</span>
+    </button>
   );
 }
 
-function OrderCard({ order, onClick, allOrders }: any) {
+function OrderCard({ order, onClick }: any) {
   const bultos = order.detailedPackaging?.reduce((acc: number, p: any) => acc + p.quantity, 0) || 0;
-  const hasReviewer = !!order.reviewer && order.reviewer !== 'SISTEMA' && order.reviewer !== 'SIN ASIGNAR';
-
   return (
-    <div onClick={onClick} className="bg-white p-6 rounded-[40px] border-2 border-slate-100 shadow-sm relative overflow-hidden cursor-pointer active:scale-[0.98] transition-all">
-      <div className="absolute top-4 right-4 flex flex-col items-end gap-1">
-         <div className={`px-2 py-0.5 rounded-lg shadow-sm border ${hasReviewer ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>
-           <span className="text-[7px] font-black uppercase truncate max-w-[80px] block">
-             {hasReviewer ? order.reviewer : 'DISPONIBLE'}
-           </span>
-         </div>
-         {hasReviewer && (
-           <div className="flex items-center gap-1 text-[6px] font-black text-indigo-400 uppercase tracking-widest animate-pulse">
-             <Users2 size={6} /> En armado
-           </div>
-         )}
-      </div>
-      <div className="flex justify-between items-start mb-4 pr-16">
+    <div onClick={onClick} className="bg-white p-6 rounded-[40px] border-2 border-slate-100 shadow-sm relative overflow-hidden cursor-pointer active:scale-95 hover:border-indigo-100 transition-all">
+      <div className="flex justify-between items-start mb-4">
         <div className="flex flex-col">
-          <span className="text-[7px] font-black text-slate-300 uppercase leading-none mb-1 tracking-widest">#ORDEN {order.orderNumber}</span>
-          <span className="text-[10px] font-black text-teal-600 tracking-tighter uppercase">{order.locality}</span>
+          <span className="text-[7px] font-black text-slate-300 uppercase mb-1 tracking-widest">ORDEN #{order.orderNumber}</span>
+          <span className="text-[10px] font-black text-indigo-600 tracking-tighter uppercase flex items-center gap-1"><MapPin size={10}/> {order.locality}</span>
         </div>
-        <span className={`text-[8px] font-black px-3 py-1.5 rounded-full uppercase ${
+        <span className={`text-[8px] font-black px-3 py-1.5 rounded-full uppercase shadow-sm ${
           order.status === OrderStatus.PENDING ? 'bg-orange-100 text-orange-600' :
           order.status === OrderStatus.COMPLETED ? 'bg-emerald-100 text-emerald-600' :
           order.status === OrderStatus.DISPATCHED ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'
         }`}>{order.status}</span>
       </div>
-      <h3 className="font-black text-slate-800 text-lg mb-3 leading-[0.85] italic">{order.customerName}</h3>
-      <div className="flex items-center justify-between border-t pt-4 mt-2">
-         <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-            <Package size={12}/> {bultos > 0 ? `${bultos} bultos` : '0 bultos'}
-         </div>
-         {order.carrier && <div className="text-[8px] font-black text-indigo-500 uppercase"><Truck size={10} className="inline mr-1"/> {order.carrier}</div>}
+      <h3 className="font-black text-slate-800 text-lg mb-3 leading-[0.85] italic uppercase tracking-tighter truncate">{order.customerName}</h3>
+      <div className="flex items-center justify-between border-t border-slate-50 pt-4">
+         <div className="flex items-center gap-2 text-[9px] font-black text-slate-400 uppercase tracking-widest"><Package size={12}/> {bultos} bultos</div>
+         {order.deliveryData?.deliveredAt ? (
+           <span className="text-[7px] font-black text-emerald-500 uppercase flex items-center gap-1 animate-in fade-in"><ShieldCheck size={8}/> Entregado</span>
+         ) : order.carrier ? (
+           <span className="text-[7px] font-black text-indigo-400 uppercase flex items-center gap-1"><Truck size={8}/> {order.carrier}</span>
+         ) : null}
       </div>
     </div>
   );
 }
 
-function TrackingInternalView({ orders, onBack, onSelectOrder }: any) {
-  const [q, setQ] = useState('');
-  const results = orders.filter((o:any) => 
-    (o.customerName?.toLowerCase() || '').includes(q.toLowerCase()) || 
-    (o.orderNumber || '').includes(q)
-  );
-  return (
-    <div className="space-y-4 animate-in slide-in-from-right">
-      <button onClick={onBack} className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest"><ArrowLeft size={14}/> Volver</button>
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-        <input className="w-full bg-white border-2 border-slate-100 p-5 pl-14 rounded-[30px] text-sm font-bold outline-none" placeholder="Buscar..." value={q} onChange={e=>setQ(e.target.value)} />
-      </div>
-      <div className="space-y-3">
-        {results.map((o:any) => <OrderCard key={o.id} order={o} onClick={() => onSelectOrder(o)} allOrders={orders} />)}
-      </div>
-    </div>
-  );
-}
+function DeliveryWorkflowModal({ order, onClose, onComplete }: any) {
+  const [step, setStep] = useState(1);
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [signature, setSignature] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
 
-function CustomerPortal({ onBack, orders, onWhatsApp, onSupportWhatsApp }: any) {
-  const [s, setS] = useState('');
-  const [code, setCode] = useState('');
-  const r = useMemo(() => {
-    if (!s && !code) return [];
-    return orders?.filter((o: any) => {
-      const matchName = s ? o.customerName?.toLowerCase().includes(s.toLowerCase()) : true;
-      const matchCode = code ? (o.customerNumber?.includes(code) || o.orderNumber?.includes(code.toUpperCase())) : true;
-      return matchName && matchCode && o.status !== OrderStatus.ARCHIVED;
-    }) || [];
-  }, [s, code, orders]);
-  return (
-    <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col pb-32">
-      <header className="flex items-center gap-4"><button onClick={onBack} className="p-4 bg-white border rounded-2xl shadow-sm text-slate-400 active:scale-95 transition-all"><ArrowLeft/></button>
-      <h2 className="text-2xl font-black italic">Consulta Pedidos</h2></header>
-      <div className="bg-white p-8 rounded-[48px] border-2 border-slate-100 space-y-6 shadow-xl">
-        <h3 className="font-black text-2xl italic leading-[0.85]">Seguimiento Envío</h3>
-        <div className="space-y-4">
-          <input className="w-full bg-slate-50 p-5 rounded-[24px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-sm uppercase shadow-inner" placeholder="Nombre de Comercio..." value={s} onChange={e=>setS(e.target.value)} />
-          <input className="w-full bg-slate-50 p-5 rounded-[24px] border-2 border-transparent focus:border-teal-500 outline-none font-black text-sm uppercase shadow-inner" placeholder="N° Orden o Pedido..." value={code} onChange={e=>setCode(e.target.value)} />
-        </div>
-      </div>
-      <div className="space-y-12 flex-1 pt-4">
-        {r.map((o:any) => (
-          <div key={o.id} className="bg-white p-10 rounded-[56px] shadow-2xl relative overflow-hidden animate-in slide-in-from-bottom duration-300">
-            <h4 className="font-black text-4xl mb-2 text-slate-800 uppercase italic tracking-tighter leading-[0.8]">{o.customerName}</h4>
-            <div className="flex items-center gap-2 text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mt-3">ORDEN #{o.orderNumber} • {o.locality}</div>
-            <div className="mt-8"><Timeline currentStatus={o.status} /></div>
-          </div>
-        ))}
-      </div>
-      <div className="pt-16 flex flex-col items-center gap-8 border-t border-slate-100 mt-12">
-          <button onClick={onSupportWhatsApp} className="w-full bg-slate-900 text-white py-6 rounded-[40px] font-black uppercase text-xs shadow-2xl flex items-center justify-center gap-4 active:scale-95 border-b-4 border-slate-700">
-            <MessageCircle size={22} className="text-emerald-400"/> CONSULTA WHATSAPP
-          </button>
-      </div>
-    </div>
-  );
-}
+  useEffect(() => {
+    if (step === 2 && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+      }
+    }
+  }, [step]);
 
-function Timeline({ currentStatus }: { currentStatus: OrderStatus }) {
-  const stages = [
-    { status: OrderStatus.PENDING, label: 'Pendiente', icon: <ClipboardList size={14} /> },
-    { status: OrderStatus.COMPLETED, label: 'Preparado', icon: <CheckCircle2 size={14} /> },
-    { status: OrderStatus.DISPATCHED, label: 'Despachado', icon: <Truck size={14} /> },
-    { status: OrderStatus.ARCHIVED, label: 'Finalizado', icon: <Package size={14} /> },
-  ];
-  const currentIndex = stages.findIndex(s => s.status === currentStatus);
+  const startDrawing = (e: any) => {
+    setIsDrawing(true);
+    draw(e);
+  };
+  const stopDrawing = () => {
+    setIsDrawing(false);
+    if (canvasRef.current) setSignature(canvasRef.current.toDataURL());
+  };
+  const draw = (e: any) => {
+    if (!isDrawing || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
+    const y = (e.clientY || (e.touches && e.touches[0].clientY)) - rect.top;
+    
+    if (ctx) {
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+    }
+  };
+
+  const clearSignature = () => {
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      setSignature(null);
+    }
+  };
+
+  const handleFinish = async () => {
+    let coords = { lat: 0, lng: 0 };
+    try {
+      const pos: any = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+      });
+      coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    } catch (e) { console.warn("GPS timeout o bloqueado"); }
+
+    onComplete(order.id, {
+      photo: photo || '',
+      signature: signature || '',
+      coordinates: coords,
+      deliveredAt: new Date().toISOString()
+    });
+  };
+
   return (
-    <div className="relative flex justify-between items-start pt-2">
-      <div className="absolute top-[18px] left-0 right-0 h-0.5 bg-slate-100 -z-10 mx-4"></div>
-      {stages.map((stage, idx) => {
-        const isCompleted = idx <= currentIndex;
-        const isCurrent = idx === currentIndex;
-        return (
-          <div key={stage.status} className="flex flex-col items-center gap-2 flex-1">
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center border-4 ${isCurrent ? 'bg-orange-500 text-white border-orange-100 scale-110 shadow-lg' : isCompleted ? 'bg-emerald-500 text-white border-emerald-50' : 'bg-white text-slate-300 border-slate-50'}`}>
-              {isCompleted && !isCurrent ? <Check size={16} /> : stage.icon}
+    <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[800] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-md rounded-[56px] p-8 shadow-2xl relative animate-in zoom-in duration-300">
+        <header className="mb-8 text-center">
+          <div className="inline-block p-3 bg-indigo-100 text-indigo-600 rounded-2xl mb-4"><Truck size={32}/></div>
+          <h2 className="text-2xl font-black italic uppercase leading-none">Confirmar Entrega</h2>
+          <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-widest">{order.customerName}</p>
+        </header>
+
+        {step === 1 && (
+          <div className="space-y-6 animate-in fade-in">
+            <h3 className="text-sm font-black text-center uppercase tracking-widest text-slate-600">Paso 1: Foto del pedido</h3>
+            <div className="aspect-square bg-slate-50 border-4 border-dashed border-slate-200 rounded-[40px] flex flex-col items-center justify-center gap-4 relative overflow-hidden group hover:border-indigo-300 transition-colors">
+              {photo ? (
+                <img src={photo} className="w-full h-full object-cover" />
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                   <Camera size={48} className="text-slate-300" />
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">Click para capturar</p>
+                </div>
+              )}
+              <input type="file" accept="image/*" capture="environment" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e:any) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = (ev) => setPhoto(ev.target?.result as string);
+                  reader.readAsDataURL(file);
+                }
+              }} />
             </div>
-            <span className={`text-[8px] font-black uppercase text-center ${isCurrent ? 'text-orange-600' : isCompleted ? 'text-emerald-600' : 'text-slate-300'}`}>{stage.label}</span>
+            <button disabled={!photo} onClick={() => setStep(2)} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all disabled:opacity-30">Continuar a Firma</button>
           </div>
-        );
-      })}
+        )}
+
+        {step === 2 && (
+          <div className="space-y-6 animate-in slide-in-from-right">
+            <div className="flex justify-between items-center">
+               <h3 className="text-sm font-black uppercase tracking-widest text-slate-600">Paso 2: Firma del Cliente</h3>
+               <button onClick={clearSignature} className="text-[9px] font-black text-red-500 uppercase hover:underline">Limpiar</button>
+            </div>
+            <div className="bg-slate-50 border-2 border-slate-200 rounded-[32px] overflow-hidden touch-none">
+               <canvas 
+                 ref={canvasRef} 
+                 width={350} 
+                 height={250} 
+                 className="w-full h-64"
+                 onMouseDown={startDrawing}
+                 onMouseMove={draw}
+                 onMouseUp={stopDrawing}
+                 onMouseOut={stopDrawing}
+                 onTouchStart={startDrawing}
+                 onTouchMove={draw}
+                 onTouchEnd={stopDrawing}
+               />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setStep(1)} className="flex-1 bg-slate-100 text-slate-500 py-5 rounded-3xl font-black uppercase text-[10px] active:scale-95 transition-all">Atrás</button>
+              <button disabled={!signature} onClick={handleFinish} className="flex-[2] bg-emerald-600 text-white py-5 rounded-3xl font-black uppercase text-xs tracking-widest shadow-xl active:scale-95 transition-all disabled:opacity-30">Finalizar Entrega</button>
+            </div>
+          </div>
+        )}
+
+        <button onClick={onClose} className="mt-8 w-full text-[10px] font-black text-slate-300 uppercase tracking-[0.2em] hover:text-red-500 transition-colors">Cancelar Operación</button>
+      </div>
+    </div>
+  );
+}
+
+function LandingScreen({ onSelectStaff, onSelectCustomer }: any) {
+  return (
+    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 z-[2000] overflow-hidden">
+      <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,rgba(79,70,229,0.1),transparent)] pointer-events-none"></div>
+      <div className="text-center space-y-4 mb-12 animate-in zoom-in duration-700">
+        <div className="p-8 bg-white/5 rounded-[56px] backdrop-blur-md border border-white/10 shadow-2xl relative">
+          <div className="absolute -top-4 -right-4 bg-orange-500 text-white text-[8px] font-black px-3 py-1 rounded-full uppercase tracking-widest rotate-12">PRO V2.1</div>
+          <h1 className="text-8xl font-black italic tracking-tighter text-white leading-none">D<span className="text-orange-500">&</span>G</h1>
+        </div>
+        <p className="text-[12px] font-black text-indigo-400 uppercase tracking-[0.4em] italic leading-none mt-2">Logística Inteligente</p>
+      </div>
+      <div className="w-full max-w-sm space-y-4 relative z-10">
+        <button onClick={onSelectStaff} className="w-full bg-slate-900 border border-indigo-500/30 text-white p-8 rounded-[40px] flex items-center gap-6 shadow-2xl active:scale-95 transition-all hover:bg-slate-800">
+          <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-600/30"><ShieldCheck size={28}/></div>
+          <div className="text-left"><h4 className="font-black uppercase text-lg leading-none mb-1">Operador</h4><p className="text-[8px] opacity-40 uppercase tracking-widest font-black">Acceso Maestro</p></div>
+        </button>
+        <button onClick={onSelectCustomer} className="w-full bg-emerald-600 text-white p-8 rounded-[40px] flex items-center gap-6 shadow-2xl active:scale-95 transition-all hover:bg-emerald-500">
+          <div className="w-14 h-14 bg-white/10 rounded-2xl flex items-center justify-center"><Search size={28}/></div>
+          <div className="text-left"><h4 className="font-black uppercase text-lg leading-none mb-1">Consultas</h4><p className="text-[8px] opacity-70 uppercase tracking-widest font-black">Rastreo de Pedido</p></div>
+        </button>
+      </div>
     </div>
   );
 }
@@ -1166,23 +888,93 @@ function Timeline({ currentStatus }: { currentStatus: OrderStatus }) {
 function LoginModal({ onLogin, onBack }: any) {
   const [n, setN] = useState('');
   return (
-    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 z-[1000]">
-      <div className="bg-white w-full max-w-sm rounded-[56px] p-12 text-center space-y-10 animate-in zoom-in shadow-[0_30px_100px_rgba(0,0,0,0.5)] relative overflow-hidden">
-        <button onClick={onBack} className="absolute top-8 left-8 p-2 text-slate-300 hover:text-slate-900 transition-colors active:scale-95"><ArrowLeft size={20}/></button>
-        <div className="space-y-2 pt-4">
-          <h1 className="text-7xl font-black italic tracking-tighter leading-none">D<span className="text-orange-500">&</span>G</h1>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em]">OPERATIVO</p>
+    <div className="fixed inset-0 bg-slate-950 flex items-center justify-center p-8 z-[1000]">
+      <div className="bg-white w-full max-w-sm rounded-[56px] p-12 text-center space-y-8 animate-in zoom-in">
+        <button onClick={onBack} className="absolute top-8 left-8 text-slate-300 hover:text-indigo-600 transition-colors"><ArrowLeft size={20}/></button>
+        <h1 className="text-6xl font-black italic leading-none">D<span className="text-orange-500">&</span>G</h1>
+        <div className="space-y-4">
+           <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Identificación de Personal</p>
+           <input className="w-full bg-slate-50 p-6 rounded-3xl text-center font-black outline-none border-2 border-transparent focus:border-indigo-500 uppercase transition-all" placeholder="CODIGO ID" value={n} onChange={e=>setN(e.target.value)} />
         </div>
-        <div className="space-y-5">
-          <input className="w-full bg-slate-50 p-6 rounded-3xl text-center font-black outline-none border-2 border-transparent focus:border-teal-500 shadow-inner uppercase text-base" placeholder="ID OPERADOR" value={n} onChange={e=>setN(e.target.value)} />
-          <button onClick={()=>onLogin({name:n||'OPERADOR'})} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase shadow-2xl tracking-widest text-sm active:scale-95">ACCEDER AL SISTEMA</button>
-        </div>
-        <div className="flex items-center justify-center gap-2 opacity-30">
-          <ShieldCheck size={12}/>
-          <span className="text-[8px] font-black uppercase tracking-widest">Conexión Segura</span>
+        <button onClick={()=>onLogin({name:n||'OPERADOR'})} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase shadow-2xl active:scale-95 hover:bg-indigo-600 transition-all">INGRESAR AL PANEL</button>
+      </div>
+    </div>
+  );
+}
+
+function NewOrderForm({ onAdd, isSaving }: any) {
+  const [form, setForm] = useState({ orderNumber: '', name: '', locality: '', notes: '' });
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-black italic uppercase text-center">Nuevo Ingreso</h2>
+      <div className="space-y-4">
+        <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase ml-3">Nº Orden</label><input className="w-full bg-slate-50 p-4 rounded-2xl font-black outline-none border-2 border-transparent focus:border-indigo-500 uppercase" value={form.orderNumber} onChange={e=>setForm({...form, orderNumber: e.target.value})} placeholder="Ej: 5542" /></div>
+        <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase ml-3">Cliente / Comercio</label><input className="w-full bg-slate-50 p-4 rounded-2xl font-black outline-none border-2 border-transparent focus:border-indigo-500 uppercase" value={form.name} onChange={e=>setForm({...form, name: e.target.value})} placeholder="NOMBRE" /></div>
+        <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase ml-3">Localidad</label><input className="w-full bg-slate-50 p-4 rounded-2xl font-black outline-none border-2 border-transparent focus:border-indigo-500 uppercase" value={form.locality} onChange={e=>setForm({...form, locality: e.target.value})} placeholder="CIUDAD" /></div>
+      </div>
+      <button disabled={isSaving} onClick={() => onAdd({...form, status: OrderStatus.PENDING, source: 'Manual'})} className="w-full bg-slate-900 text-white py-6 rounded-[32px] font-black uppercase text-xs shadow-xl active:scale-95 hover:bg-indigo-600 transition-all">
+        {isSaving ? <Loader2 className="animate-spin inline mr-2"/> : 'CONFIRMAR CARGA'}
+      </button>
+    </div>
+  );
+}
+
+function CustomerPortal({ onBack, orders }: any) {
+  const [s, setS] = useState('');
+  const results = orders?.filter((o:any) => 
+    (o.customerName?.toLowerCase().includes(s.toLowerCase()) || o.orderNumber?.includes(s)) && 
+    o.status !== OrderStatus.ARCHIVED
+  ) || [];
+
+  return (
+    <div className="p-6 space-y-6 max-w-md mx-auto min-h-screen bg-slate-50">
+      <header className="flex items-center gap-4 animate-in slide-in-from-left">
+        <button onClick={onBack} className="p-4 bg-white border rounded-2xl shadow-sm text-slate-300 hover:text-emerald-500 transition-colors"><ArrowLeft/></button>
+        <h2 className="text-2xl font-black italic">Rastreo de Pedido</h2>
+      </header>
+      <div className="bg-white p-8 rounded-[48px] shadow-xl space-y-4 animate-in zoom-in">
+        <h3 className="font-black text-xl italic leading-none">¿Dónde está mi envío?</h3>
+        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Ingresa el nombre del comercio para consultar el estado actual en tiempo real.</p>
+        <div className="relative">
+           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-200" size={18}/>
+           <input className="w-full bg-slate-50 p-5 pl-12 rounded-[24px] outline-none font-black text-sm uppercase shadow-inner border-2 border-transparent focus:border-emerald-500 transition-all" placeholder="Buscar mi pedido..." value={s} onChange={e=>setS(e.target.value)} />
         </div>
       </div>
-      <p className="mt-10 text-[9px] font-black text-white/20 uppercase tracking-[0.6em] italic">FIRMAT, SANTA FE • VERSION 3.5</p>
+      <div className="space-y-6">
+        {results.map((o:any) => (
+          <div key={o.id} className="bg-white p-10 rounded-[56px] shadow-2xl animate-in slide-in-from-bottom border-b-8 border-emerald-500/20">
+            <h4 className="font-black text-4xl mb-2 text-slate-800 uppercase italic tracking-tighter leading-[0.8]">{o.customerName}</h4>
+            <div className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mt-3 mb-8">PEDIDO #{o.orderNumber} • {o.locality}</div>
+            <div className="relative flex justify-between items-start pt-2">
+               <div className="absolute top-6 left-0 right-0 h-1 bg-slate-100 -z-10 rounded-full"></div>
+               {[OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED].map((st, idx) => {
+                 const isActive = o.status === st;
+                 const isPassed = (o.status === OrderStatus.COMPLETED && st === OrderStatus.PENDING) || 
+                                  (o.status === OrderStatus.DISPATCHED && (st === OrderStatus.PENDING || st === OrderStatus.COMPLETED));
+                 return (
+                   <div key={st} className="flex flex-col items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full border-4 flex items-center justify-center transition-all duration-500 ${
+                        isActive ? 'bg-orange-500 text-white border-orange-100 scale-125 shadow-lg shadow-orange-500/30' : 
+                        isPassed ? 'bg-emerald-500 text-white border-emerald-50' : 'bg-white text-slate-200 border-slate-50'
+                      }`}>
+                        {isActive ? <Activity size={16} className="animate-pulse"/> : isPassed ? <Check size={16}/> : idx + 1}
+                      </div>
+                      <span className={`text-[8px] font-black uppercase ${isActive ? 'text-orange-600' : isPassed ? 'text-emerald-600' : 'text-slate-300'}`}>
+                        {st === OrderStatus.PENDING ? 'Ingreso' : st === OrderStatus.COMPLETED ? 'Preparado' : 'En Ruta'}
+                      </span>
+                   </div>
+                 );
+               })}
+            </div>
+          </div>
+        ))}
+        {s && results.length === 0 && (
+          <div className="text-center py-20 opacity-20">
+             <ServerCrash size={64} className="mx-auto mb-4"/>
+             <p className="font-black uppercase text-xs tracking-[0.2em]">Pedido no encontrado</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
