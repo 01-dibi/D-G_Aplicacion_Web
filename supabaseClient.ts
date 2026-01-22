@@ -10,6 +10,10 @@ const getEnv = (name: string) => {
       // @ts-ignore
       envVal = (typeof process !== 'undefined' && process.env && process.env[name]) || '';
     }
+    if (!envVal && typeof window !== 'undefined') {
+      // @ts-ignore
+      envVal = window[name] || '';
+    }
   } catch (e) {
     console.warn(`Error accediendo a variable ${name}:`, e);
   }

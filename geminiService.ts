@@ -9,6 +9,10 @@ const getApiKey = () => {
       // @ts-ignore
       key = (import.meta && import.meta.env && import.meta.env.VITE_API_KEY) || '';
     }
+    if (!key && typeof window !== 'undefined') {
+      // @ts-ignore
+      key = window.API_KEY || '';
+    }
   } catch (e) {
     console.error("Error obteniendo API_KEY:", e);
   }
