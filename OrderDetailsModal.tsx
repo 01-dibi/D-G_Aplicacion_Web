@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
-  X, MapPin, Plus, Package, Trash, Save, Check, MessageCircle, Hash, Activity, UserPlus, ArrowRight
+  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -16,13 +16,12 @@ interface OrderDetailsModalProps {
 }
 
 export default function OrderDetailsModal({ 
-  order, allOrders, onClose, onUpdate, onDelete, isSaving, currentUserName 
+  order, allOrders, onClose, onUpdate, onDelete, isSaving 
 }: OrderDetailsModalProps) {
-  // El historial se considera cuando el estado es ARCHIVED ('FINALIZADO')
+  // Estado de Solo Lectura: Si el pedido ya está FINALIZADO
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
   
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
-  const [isAddingOrderNum, setIsAddingOrderNum] = useState(false);
   const [newCollab, setNewCollab] = useState('');
   
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
@@ -33,6 +32,7 @@ export default function OrderDetailsModal({
     "VENDEDORES": ["MAURO", "GUSTAVO"]
   };
 
+  // Estados locales para los campos editables
   const [warehouseSelection, setWarehouseSelection] = useState(order.warehouse ? (warehouses.includes(order.warehouse) ? order.warehouse : 'Otros:') : warehouses[0]);
   const [customWarehouseText, setCustomWarehouseText] = useState(!warehouses.includes(order.warehouse || '') ? (order.warehouse || '') : '');
   const [packageTypeSelection, setPackageTypeSelection] = useState(order.packageType ? (packageTypes.includes(order.packageType) ? order.packageType : 'OTROS:') : packageTypes[0]);
@@ -43,39 +43,31 @@ export default function OrderDetailsModal({
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
 
-  // Auto-asignación de responsable si está vacío
-  useEffect(() => {
-    if (!isReadOnly && (!order.reviewer || order.reviewer.trim() === '') && currentUserName) {
-      onUpdate({ ...order, reviewer: currentUserName.toUpperCase() });
-    }
-  }, [order.id, currentUserName, isReadOnly]);
-
   const totalConfirmedQuantity = useMemo(() => {
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
-
-  const siblingOrders = useMemo(() => {
-    if (!order.customerNumber) return [];
-    return allOrders.filter(o => String(o.customerNumber) === String(order.customerNumber) && o.id !== order.id && o.status === OrderStatus.PENDING);
-  }, [allOrders, order]);
 
   // --- LÓGICA DE CONFIRMACIÓN Y AVANCE DE ETAPA ---
   const handleConfirmStage = async () => {
     if (isSaving) return;
 
-    // 1. Calcular el siguiente estado
-    let nextStatus = order.status;
+    // Definir el siguiente estado de forma robusta
+    let nextStatus: OrderStatus = order.status;
     if (order.status === OrderStatus.PENDING) nextStatus = OrderStatus.COMPLETED;
     else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
     else if (order.status === OrderStatus.DISPATCHED) nextStatus = OrderStatus.ARCHIVED;
 
-    // 2. Preparar los valores finales (incluyendo campos personalizados)
+    // Si ya está finalizado, no hacemos nada
+    if (order.status === OrderStatus.ARCHIVED) return;
+
+    // Preparar valores de depósito y bulto (considerando los "Otros")
     const finalWarehouse = warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection;
     const finalPackageType = packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection;
+    
+    // Preparar valores de despacho
     const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
     const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
 
-    // 3. Crear el objeto actualizado completo
     const updatedOrder: Order = {
       ...order,
       status: nextStatus,
@@ -84,28 +76,36 @@ export default function OrderDetailsModal({
       packageQuantity: totalConfirmedQuantity,
       detailedPackaging: confirmedEntries,
       dispatchType: dispatchTypeSelection,
-      dispatchValue: finalDispatchValue,
-      reviewer: order.reviewer // Mantenemos el responsable actual/colaboradores
+      dispatchValue: finalDispatchValue
     };
 
-    // 4. Ejecutar actualización en DB
+    // Llamada a la función de actualización de App.tsx (Supabase)
     const success = await onUpdate(updatedOrder);
-
-    // 5. Si la actualización fue exitosa, cerramos el modal para reflejar el cambio de vista
+    
+    // Si se guardó correctamente, cerramos el modal para mostrar los cambios en la lista principal
     if (success) {
       onClose();
     }
   };
 
-  const handleAddCollaborator = async () => {
-    if (isReadOnly) return;
-    const name = newCollab.trim().toUpperCase();
-    if (!name) return;
-    const current = order.reviewer ? order.reviewer.split(',').map(s => s.trim()).filter(s => s !== '') : [];
-    if (!current.includes(name)) {
-      const updatedReviewer = [...current, name].join(', ');
-      await onUpdate({...order, reviewer: updatedReviewer});
-    }
+  // --- LÓGICA DE RESPONSABLES / COLABORADORES ---
+  const handleAddCollaborators = async () => {
+    if (isReadOnly || !newCollab.trim()) return;
+
+    // Procesar la entrada: separar por comas si el usuario escribió varios
+    const namesToAdd = newCollab.split(',')
+      .map(n => n.trim().toUpperCase())
+      .filter(n => n !== "");
+
+    const currentNames = order.reviewer ? order.reviewer.split(',').map(n => n.trim()) : [];
+    
+    // Unir nombres existentes con los nuevos evitando duplicados
+    const allNames = Array.from(new Set([...currentNames, ...namesToAdd])).filter(n => n !== "");
+    const updatedReviewer = allNames.join(', ');
+
+    // Actualizar inmediatamente en la base de datos para que sea visible
+    await onUpdate({ ...order, reviewer: updatedReviewer });
+    
     setNewCollab('');
     setIsAddingCollaborator(false);
   };
@@ -121,43 +121,59 @@ export default function OrderDetailsModal({
 
         <div className="pt-10 space-y-8">
           
-          {/* SECCIÓN SUPERIOR: PEDIDO Y RESPONSABLE */}
+          {/* CABECERA: PEDIDO Y RESPONSABLES */}
           <div className="flex justify-between items-center px-2">
-            <div className="flex items-center gap-2 relative">
-              <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">PEDIDO {order.orderNumber || '---'}</span>
-              </div>
-              {!isReadOnly && (
-                <button onClick={() => setIsAddingOrderNum(!isAddingOrderNum)} className="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 border-2 border-white transition-all">
-                  <Plus size={20} strokeWidth={4}/>
-                </button>
-              )}
+            <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">PEDIDO {order.orderNumber || '---'}</span>
             </div>
 
             <div className="flex items-center gap-2 relative">
-              <div className="bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-3 border border-white/10">
-                <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-black uppercase tracking-tight">{order.reviewer || 'ASIGNANDO...'}</span>
+              {/* Lugar donde se colocan los responsables asignados */}
+              <div className="bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-3 border border-white/10 min-w-[120px] justify-center">
+                <Users size={14} className="text-orange-500" />
+                <span className="text-[10px] font-black uppercase tracking-tight truncate max-w-[140px]">
+                  {order.reviewer || 'SIN ASIGNAR'}
+                </span>
               </div>
+              
               {!isReadOnly && (
-                <button onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} className="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 border-2 border-white transition-all">
-                  <Plus size={20} strokeWidth={4}/>
-                </button>
-              )}
-              {isAddingCollaborator && (
-                <div className="absolute top-full right-0 mt-3 w-72 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.3)] rounded-[32px] p-6 z-[1000] animate-in zoom-in">
-                  <div className="flex gap-2">
-                    <input className="flex-1 bg-slate-50 p-4 rounded-2xl text-xs font-black uppercase outline-none shadow-inner" placeholder="NOMBRE..." value={newCollab} onChange={e => setNewCollab(e.target.value)} />
-                    <button onClick={handleAddCollaborator} className="bg-indigo-600 text-white p-4 rounded-2xl shadow-lg"><Check size={20} strokeWidth={4}/></button>
-                  </div>
+                <div className="relative">
+                  <button 
+                    onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} 
+                    className="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 border-2 border-white transition-all z-[900]"
+                  >
+                    <UserPlus size={20} strokeWidth={3}/>
+                  </button>
+
+                  {isAddingCollaborator && (
+                    <div className="absolute top-full right-0 mt-3 w-72 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.4)] rounded-[32px] p-6 z-[1000] animate-in zoom-in">
+                      <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Asignar Responsable(s)</p>
+                      <div className="flex gap-2">
+                        <input 
+                          className="flex-1 bg-slate-50 p-4 rounded-2xl text-xs font-black uppercase outline-none shadow-inner border border-transparent focus:border-indigo-100" 
+                          placeholder="NOMBRE O NOMBRES..." 
+                          value={newCollab} 
+                          onChange={e => setNewCollab(e.target.value)} 
+                          autoFocus
+                          onKeyDown={(e) => e.key === 'Enter' && handleAddCollaborators()}
+                        />
+                        <button onClick={handleAddCollaborators} className="bg-indigo-600 text-white p-4 rounded-2xl shadow-lg">
+                          <Check size={20} strokeWidth={4}/>
+                        </button>
+                      </div>
+                      <p className="text-[8px] text-slate-300 mt-3 uppercase font-bold">Puedes separar varios con comas</p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
-          {/* CUERPO CENTRAL: CLIENTE */}
+          {/* DATOS DEL CLIENTE */}
           <div className="text-center bg-slate-50/70 py-10 rounded-[45px] border border-slate-200/50 shadow-inner">
-            <h2 className="text-4xl font-black italic uppercase leading-none tracking-tighter text-slate-900 mb-4 px-6">{order.customerName}</h2>
+            <h2 className="text-4xl font-black italic uppercase leading-none tracking-tighter text-slate-900 mb-4 px-6">
+              {order.customerName}
+            </h2>
             <div className="flex items-center justify-center gap-6">
               <div className="flex items-center gap-2 text-[13px] font-black text-slate-400 uppercase tracking-tight">
                 <Hash size={18} className="text-slate-300" />
@@ -171,23 +187,34 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* SELECTORES DE CARGA (BLOQUEADOS EN HISTORIAL) */}
+          {/* FORMULARIO DE CARGA DE BULTOS */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5"><label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Depósito Origen</label>
-              <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none disabled:bg-slate-50 disabled:text-slate-400 transition-all border-2 border-transparent focus:border-indigo-100" value={warehouseSelection} onChange={e => setWarehouseSelection(e.target.value)}>
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Depósito Origen</label>
+              <select 
+                disabled={isReadOnly} 
+                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 disabled:bg-slate-50 transition-all" 
+                value={warehouseSelection} 
+                onChange={e => setWarehouseSelection(e.target.value)}
+              >
                 {warehouses.map(w => <option key={w}>{w}</option>)}
               </select>
             </div>
-            <div className="space-y-1.5"><label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Formato Bulto</label>
-              <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none disabled:bg-slate-50 disabled:text-slate-400 transition-all border-2 border-transparent focus:border-indigo-100" value={packageTypeSelection} onChange={e => setPackageTypeSelection(e.target.value)}>
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Formato Bulto</label>
+              <select 
+                disabled={isReadOnly} 
+                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 disabled:bg-slate-50 transition-all" 
+                value={packageTypeSelection} 
+                onChange={e => setPackageTypeSelection(e.target.value)}
+              >
                 {packageTypes.map(t => <option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
 
-          {/* ENTRADA DE CANTIDAD (BLOQUEADA EN HISTORIAL) */}
           <div className="grid grid-cols-2 gap-5">
-            <div className="bg-indigo-50/70 p-7 rounded-[35px] border-2 border-indigo-100 text-center relative">
+            <div className="bg-indigo-50/70 p-7 rounded-[35px] border-2 border-indigo-100 text-center">
               <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Añadir Cant.</span>
               <input 
                 disabled={isReadOnly} 
@@ -211,21 +238,28 @@ export default function OrderDetailsModal({
                 setConfirmedEntries([...confirmedEntries, { id: Date.now().toString(), deposit: warehouseSelection, type: packageTypeSelection, quantity: currentQty }]);
                 setCurrentQty(0);
               }} 
-              className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all"
+              className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all hover:bg-black"
             >
               <Plus size={22} strokeWidth={4}/> CONFIRMAR CARGA
             </button>
           )}
 
-          {/* LISTA DE CARGAS REALIZADAS */}
+          {/* LISTA DE BULTOS CONFIRMADOS */}
           {confirmedEntries.length > 0 && (
             <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar p-1">
               {confirmedEntries.map(e => (
-                <div key={e.id} className="flex items-center justify-between bg-white border-2 border-slate-50 p-4 rounded-3xl shadow-sm">
-                  <div><p className="text-[9px] font-black text-indigo-500 uppercase italic">{e.deposit}</p><p className="text-[11px] font-black text-slate-800 uppercase tracking-tight">{e.type}</p></div>
+                <div key={e.id} className="flex items-center justify-between bg-white border-2 border-slate-50 p-4 rounded-3xl shadow-sm hover:border-indigo-100 transition-all">
+                  <div>
+                    <p className="text-[9px] font-black text-indigo-500 uppercase italic leading-none">{e.deposit}</p>
+                    <p className="text-[11px] font-black text-slate-800 uppercase mt-1 tracking-tight">{e.type}</p>
+                  </div>
                   <div className="flex items-center gap-4">
-                    <span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black text-slate-900">{e.quantity}</span>
-                    {!isReadOnly && <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2 active:scale-90"><Trash size={20}/></button>}
+                    <span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black text-slate-900 border border-slate-200">{e.quantity}</span>
+                    {!isReadOnly && (
+                      <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2 active:scale-90 hover:text-red-600 transition-colors">
+                        <Trash size={20}/>
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -235,20 +269,32 @@ export default function OrderDetailsModal({
           {/* DATOS DE DESPACHO */}
           <div className="bg-indigo-600 p-8 rounded-[40px] text-white space-y-4 shadow-2xl relative overflow-hidden">
              <div className="absolute top-0 right-0 opacity-10 rotate-12 -mr-6 -mt-6"><Package size={120}/></div>
-             <h3 className="text-[11px] font-black uppercase italic tracking-[0.2em] opacity-80 flex items-center gap-3"><Activity size={16}/> Datos de Despacho</h3>
-             <select disabled={isReadOnly} className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none disabled:opacity-50" value={dispatchTypeSelection} onChange={e => setDispatchTypeSelection(e.target.value)}>
+             <h3 className="text-[11px] font-black uppercase italic tracking-[0.2em] opacity-80 flex items-center gap-3">
+               <Activity size={16}/> Datos de Despacho
+             </h3>
+             <select 
+               disabled={isReadOnly} 
+               className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none focus:bg-white/20 transition-all disabled:opacity-50" 
+               value={dispatchTypeSelection} 
+               onChange={e => setDispatchTypeSelection(e.target.value)}
+             >
                {dispatchMainTypes.map(t => <option key={t} className="bg-indigo-700">{t}</option>)}
              </select>
              {dispatchOptions[dispatchTypeSelection] && (
-               <select disabled={isReadOnly} className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none disabled:opacity-50" value={dispatchValueSelection} onChange={e => setDispatchValueSelection(e.target.value)}>
+               <select 
+                 disabled={isReadOnly} 
+                 className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none focus:bg-white/20 transition-all disabled:opacity-50" 
+                 value={dispatchValueSelection} 
+                 onChange={e => setDispatchValueSelection(e.target.value)}
+               >
                  <option className="bg-indigo-700" value="">Seleccionar responsable...</option>
                  {dispatchOptions[dispatchTypeSelection].map(o => <option key={o} value={o} className="bg-indigo-700">{o}</option>)}
                </select>
              )}
           </div>
 
-          {/* BOTONERA PRINCIPAL VINCULADA */}
-          <div className="space-y-4">
+          {/* BOTONERA PRINCIPAL CORREGIDA */}
+          <div className="space-y-4 pb-4">
             {!isReadOnly ? (
               <button 
                 onClick={handleConfirmStage} 
@@ -264,7 +310,10 @@ export default function OrderDetailsModal({
               </div>
             )}
             
-            <button onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido: ' + order.customerName + ' está ' + order.status)}`)} className="w-full bg-emerald-500 text-white py-5 rounded-[32px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg hover:bg-emerald-600 transition-all active:scale-95 border-b-4 border-emerald-700">
+            <button 
+              onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido: ' + order.customerName + ' está ' + order.status)}`)} 
+              className="w-full bg-emerald-500 text-white py-5 rounded-[32px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg hover:bg-emerald-600 transition-all active:scale-95 border-b-4 border-emerald-700"
+            >
               <MessageCircle size={22} className="fill-white"/> NOTIFICAR WHATSAPP
             </button>
             
