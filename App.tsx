@@ -253,7 +253,13 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[600] flex items-center justify-center p-5">
           <div className="bg-white w-full max-md rounded-[40px] p-8 shadow-2xl relative overflow-y-auto max-h-[90vh] animate-in zoom-in duration-200">
             <button onClick={() => setIsNewOrderModalOpen(false)} className="absolute top-8 right-8 text-slate-300 hover:text-red-500 transition-colors"><X/></button>
-            <NewOrderForm onAdd={(d:any) => { handleCreateOrder(d); setIsNewOrderModalOpen(false); }} isSaving={isSaving} />
+            <NewOrderForm 
+              onAdd={async (d:any) => { 
+                const success = await handleCreateOrder(d); 
+                if (success) setIsNewOrderModalOpen(false); 
+              }} 
+              isSaving={isSaving} 
+            />
           </div>
         </div>
       )}
@@ -279,4 +285,3 @@ export default function App() {
     </div>
   );
 }
-    
