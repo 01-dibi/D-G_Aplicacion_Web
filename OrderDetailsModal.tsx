@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { 
-  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users
+  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -16,12 +16,19 @@ interface OrderDetailsModalProps {
 }
 
 export default function OrderDetailsModal({ 
-  order, onClose, onUpdate, onDelete, isSaving 
+  order, allOrders, onClose, onUpdate, onDelete, isSaving 
 }: OrderDetailsModalProps) {
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
+  
+  // Estados para Responsables
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
   const [newCollabInput, setNewCollabInput] = useState('');
   
+  // Estados para Vinculación de Pedidos (Agrupación)
+  const [isLinkingOrder, setIsLinkingOrder] = useState(false);
+  const [linkOrderInput, setLinkOrderInput] = useState('');
+  const [linkedOrders, setLinkedOrders] = useState<Order[]>([order]);
+
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
   const packageTypes = ["CAJA", "BOLSA:", "PAQUETE", "BOBINA", "OTROS:"];
   const dispatchMainTypes = ["VIAJANTES", "VENDEDORES", "TRANSPORTE", "RETIRO PERSONAL"];
@@ -40,9 +47,37 @@ export default function OrderDetailsModal({
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
 
+  // Calculamos el total de bultos del pedido actual más los pedidos vinculados
   const totalConfirmedQuantity = useMemo(() => {
-    return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
-  }, [confirmedEntries]);
+    const currentModalTotal = confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
+    // Sumamos los bultos de los OTROS pedidos vinculados (excluyendo el actual que se está editando en el modal)
+    const otherLinkedTotal = linkedOrders
+      .filter(lo => lo.id !== order.id)
+      .reduce((sum, lo) => sum + (lo.packageQuantity || 0), 0);
+    
+    return currentModalTotal + otherLinkedTotal;
+  }, [confirmedEntries, linkedOrders, order.id]);
+
+  const handleLinkOrder = () => {
+    const num = linkOrderInput.trim();
+    if (!num) return;
+
+    // Buscamos el pedido en la lista global que coincida con el número y sea del mismo cliente
+    const found = allOrders.find(o => 
+      o.orderNumber === num && 
+      o.customerNumber === order.customerNumber &&
+      o.id !== order.id &&
+      !linkedOrders.find(lo => lo.id === o.id)
+    );
+
+    if (found) {
+      setLinkedOrders([...linkedOrders, found]);
+      setLinkOrderInput('');
+      setIsLinkingOrder(false);
+    } else {
+      alert("No se encontró un pedido pendiente con ese número para este cliente.");
+    }
+  };
 
   const handleConfirmStage = async () => {
     if (isSaving || isReadOnly) return;
@@ -57,19 +92,35 @@ export default function OrderDetailsModal({
     const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
     const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
 
-    const updatedOrder: Order = {
+    // Actualizamos el pedido principal
+    const updatedMainOrder: Order = {
       ...order,
       status: nextStatus,
       warehouse: finalWarehouse,
       packageType: finalPackageType,
-      packageQuantity: totalConfirmedQuantity,
+      packageQuantity: confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0),
       detailedPackaging: confirmedEntries,
       dispatchType: dispatchTypeSelection,
       dispatchValue: finalDispatchValue
     };
 
-    const success = await onUpdate(updatedOrder);
-    if (success) onClose();
+    const successMain = await onUpdate(updatedMainOrder);
+    
+    if (successMain) {
+      // Si hay pedidos vinculados, también los hacemos avanzar de etapa
+      for (const lo of linkedOrders) {
+        if (lo.id === order.id) continue;
+        await onUpdate({
+          ...lo,
+          status: nextStatus,
+          // Opcionalmente copiamos datos de despacho si es necesario
+          dispatchType: dispatchTypeSelection,
+          dispatchValue: finalDispatchValue,
+          reviewer: order.reviewer
+        });
+      }
+      onClose();
+    }
   };
 
   const handleAddCollaborators = async () => {
@@ -99,9 +150,46 @@ export default function OrderDetailsModal({
 
         <div className="pt-10 space-y-8">
           <div className="flex justify-between items-center px-2">
-            <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">PEDIDO {order.orderNumber || '---'}</span>
+            <div className="flex items-center gap-2">
+              {/* Botón (+) para juntar pedidos */}
+              {!isReadOnly && (
+                <div className="relative">
+                  <button 
+                    onClick={() => setIsLinkingOrder(!isLinkingOrder)} 
+                    className="w-10 h-10 bg-orange-500 text-white rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-all hover:bg-orange-600"
+                  >
+                    <Plus size={20} strokeWidth={3}/>
+                  </button>
+                  {isLinkingOrder && (
+                    <div className="absolute top-full left-0 mt-3 w-64 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.4)] rounded-[28px] p-5 z-[1000] animate-in zoom-in slide-in-from-top-2">
+                      <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Vincular otro Pedido</p>
+                      <div className="flex gap-2">
+                        <input 
+                          className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none border border-transparent focus:border-orange-100" 
+                          placeholder="N° PEDIDO..." 
+                          value={linkOrderInput} 
+                          onChange={e => setLinkOrderInput(e.target.value)} 
+                          autoFocus 
+                          onKeyDown={(e) => e.key === 'Enter' && handleLinkOrder()} 
+                        />
+                        <button onClick={handleLinkOrder} className="bg-orange-500 text-white p-3 rounded-xl shadow-md"><Check size={18} strokeWidth={4}/></button>
+                      </div>
+                      <p className="text-[8px] text-slate-300 mt-2 uppercase font-bold leading-tight italic">Debe ser del mismo cliente</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm flex flex-col">
+                <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
+                  {linkedOrders.length > 1 ? `PEDIDOS (${linkedOrders.length})` : 'PEDIDO INDIVIDUAL'}
+                </span>
+                <span className="text-[11px] font-black text-slate-700 uppercase tracking-tighter">
+                  {linkedOrders.map(lo => lo.orderNumber).join(' + ')}
+                </span>
+              </div>
             </div>
+
             <div className="flex items-center gap-2 relative">
               <div className="bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-white/10 min-w-[140px] max-w-[180px] justify-center overflow-hidden">
                 <Users size={14} className="text-orange-500 flex-shrink-0" />
@@ -151,9 +239,14 @@ export default function OrderDetailsModal({
               <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Añadir Cant.</span>
               <input disabled={isReadOnly} type="number" className="w-full bg-transparent text-4xl font-black text-indigo-700 outline-none text-center mt-1" value={currentQty || ''} placeholder="0" onChange={e => setCurrentQty(parseInt(e.target.value) || 0)} />
             </div>
-            <div className="bg-orange-50/70 p-7 rounded-[35px] border-2 border-orange-100 text-center">
-              <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest">Total Acum.</span>
-              <p className="text-4xl font-black text-orange-700 mt-1">{totalConfirmedQuantity}</p>
+            <div className="bg-orange-50/70 p-7 rounded-[35px] border-2 border-orange-100 text-center relative overflow-hidden">
+              <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest relative z-10">Total Acum.</span>
+              <p className="text-4xl font-black text-orange-700 mt-1 relative z-10">{totalConfirmedQuantity}</p>
+              {linkedOrders.length > 1 && (
+                <div className="absolute bottom-2 right-4 opacity-20 rotate-12 z-0">
+                   <LinkIcon size={40} className="text-orange-500" />
+                </div>
+              )}
             </div>
           </div>
 
@@ -169,6 +262,28 @@ export default function OrderDetailsModal({
                   <div className="flex items-center gap-4"><span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black text-slate-900">{e.quantity}</span>{!isReadOnly && <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2 active:scale-90"><Trash size={20}/></button>}</div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Lista de pedidos vinculados si hay más de uno */}
+          {linkedOrders.length > 1 && (
+            <div className="bg-slate-50 p-6 rounded-[35px] border border-slate-200">
+               <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                 <LinkIcon size={12}/> Pedidos vinculados (avanzan juntos)
+               </h4>
+               <div className="flex flex-wrap gap-2">
+                 {linkedOrders.map(lo => (
+                   <div key={lo.id} className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl flex items-center gap-2">
+                      <span className="text-[10px] font-black text-slate-700 uppercase">#{lo.orderNumber}</span>
+                      <span className="text-[8px] font-bold text-slate-400">({lo.packageQuantity || 0} b.)</span>
+                      {lo.id !== order.id && (
+                        <button onClick={() => setLinkedOrders(linkedOrders.filter(x => x.id !== lo.id))} className="text-red-400 hover:text-red-600">
+                          <X size={12} strokeWidth={3}/>
+                        </button>
+                      )}
+                   </div>
+                 ))}
+               </div>
             </div>
           )}
 

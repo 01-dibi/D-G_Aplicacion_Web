@@ -105,12 +105,9 @@ export default function App() {
     );
   }, [orders, view, searchTerm]);
 
-  // ESTRATEGIA DE GUARDADO SEGURO
   const handleUpdateOrder = async (updatedOrder: Order) => {
     setIsSaving(true);
     try {
-      console.log("Sincronizando ID:", updatedOrder.id);
-      
       const fullPayload = {
         status: updatedOrder.status,
         notes: updatedOrder.notes,
@@ -130,35 +127,25 @@ export default function App() {
 
       const { error } = await supabase.from('orders').update(fullPayload).eq('id', updatedOrder.id);
       
-      if (error) {
-        // Error de columna inexistente (PGRST204)
-        if (error.code === 'PGRST204' || error.message?.includes('column')) {
-          console.warn("Faltan columnas en la base de datos. Intentando guardado básico...");
-          
-          const basicPayload = {
-            status: updatedOrder.status,
-            customer_name: updatedOrder.customerName,
-            locality: updatedOrder.locality,
-            order_number: updatedOrder.orderNumber,
-            notes: updatedOrder.notes
-          };
-
-          const { error: fallbackError } = await supabase.from('orders').update(basicPayload).eq('id', updatedOrder.id);
-          
-          if (fallbackError) throw fallbackError;
-
-          alert("⚠️ AVISO: La tabla 'orders' en Supabase no tiene las nuevas columnas (dispatch_type, package_type, etc.). Se guardó solo el estado y datos básicos.\n\nPor favor, ejecuta el script SQL para actualizar la tabla.");
-        } else {
-          throw error;
-        }
+      if (error && (error.code === 'PGRST204' || error.message?.includes('column'))) {
+        const basicPayload = {
+          status: updatedOrder.status,
+          customer_name: updatedOrder.customerName,
+          locality: updatedOrder.locality,
+          order_number: updatedOrder.orderNumber,
+          notes: updatedOrder.notes
+        };
+        await supabase.from('orders').update(basicPayload).eq('id', updatedOrder.id);
+        alert("⚠️ AVISO: Columnas de despacho no encontradas. Se guardó solo el estado básico. Actualiza tu tabla en Supabase.");
+      } else if (error) {
+        throw error;
       }
       
       await fetchOrders();
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
-      console.error("Error crítico en handleUpdateOrder:", err);
-      alert(`Error de sincronización: ${err.message || 'Error desconocido'}`);
+      alert(`Error de sincronización: ${err.message}`);
       return false;
     } finally {
       setIsSaving(false);
@@ -177,7 +164,6 @@ export default function App() {
         status: OrderStatus.PENDING,
         source: newOrder.source || 'Manual'
       }]);
-      
       if (error) throw error;
       await fetchOrders();
       return true;
@@ -208,7 +194,7 @@ export default function App() {
   if (!currentUser) return <LoginModal onLogin={u => { setCurrentUser(u); localStorage.setItem('dg_user', JSON.stringify(u)); }} onBack={() => setIsLandingMode(true)} />;
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-24 font-sans relative">
+    <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-32 font-sans relative">
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-slate-900/60 z-[200]" onClick={() => setIsSidebarOpen(false)}>
           <div className="absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-2xl animate-in slide-in-from-left duration-300" onClick={e => e.stopPropagation()}>
@@ -281,13 +267,7 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[600] flex items-center justify-center p-5">
           <div className="bg-white w-full max-md rounded-[40px] p-8 shadow-2xl relative overflow-y-auto max-h-[90vh] animate-in zoom-in duration-200">
             <button onClick={() => setIsNewOrderModalOpen(false)} className="absolute top-8 right-8 text-slate-300 hover:text-red-500 transition-colors"><X/></button>
-            <NewOrderForm 
-              onAdd={async (d:any) => { 
-                const success = await handleCreateOrder(d); 
-                if (success) setIsNewOrderModalOpen(false); 
-              }} 
-              isSaving={isSaving} 
-            />
+            <NewOrderForm onAdd={async (d:any) => { const success = await handleCreateOrder(d); if (success) setIsNewOrderModalOpen(false); }} isSaving={isSaving} />
           </div>
         </div>
       )}
@@ -304,12 +284,23 @@ export default function App() {
         />
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t p-4 flex justify-around items-center max-w-md mx-auto rounded-t-[32px] shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.05)] z-40">
-        <NavBtn icon={<LayoutDashboard />} active={view === 'DASHBOARD'} onClick={() => setView('DASHBOARD')} />
-        <NavBtn icon={<ClipboardList />} active={view === 'PENDING'} onClick={() => setView('PENDING')} />
-        <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition-all" onClick={() => setIsNewOrderModalOpen(true)}><Plus size={24} /></div>
-        <NavBtn icon={<Truck />} active={view === 'DISPATCHED'} onClick={() => setView('DISPATCHED')} />
-        <NavBtn icon={<History />} active={view === 'ALL'} onClick={() => setView('ALL')} />
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t pt-3 pb-6 px-1 flex justify-between items-end max-w-md mx-auto rounded-t-[32px] shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.05)] z-40">
+        <NavBtn label="Inicio" icon={<LayoutDashboard />} active={view === 'DASHBOARD'} onClick={() => setView('DASHBOARD')} />
+        <NavBtn label="Pend." icon={<ClipboardList />} active={view === 'PENDING'} onClick={() => setView('PENDING')} />
+        <NavBtn label="Prep." icon={<CheckCircle2 />} active={view === 'COMPLETED'} onClick={() => setView('COMPLETED')} />
+        
+        <div className="flex flex-col items-center gap-1.5 flex-1 mb-1">
+          <div 
+            className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition-all border-4 border-white -mt-4" 
+            onClick={() => setIsNewOrderModalOpen(true)}
+          >
+            <Plus size={24} />
+          </div>
+          <span className="text-[8px] font-black uppercase tracking-tighter text-slate-400">Nueva</span>
+        </div>
+
+        <NavBtn label="Desp." icon={<Truck />} active={view === 'DISPATCHED'} onClick={() => setView('DISPATCHED')} />
+        <NavBtn label="Hist." icon={<History />} active={view === 'ALL'} onClick={() => setView('ALL')} />
       </nav>
     </div>
   );

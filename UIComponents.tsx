@@ -1,14 +1,19 @@
 
 import React from 'react';
-import { Package, Truck, Sparkles, Hash } from 'lucide-react';
+import { Package, Truck, Sparkles, Hash, Users, MapPin, ChevronRight } from 'lucide-react';
 import { OrderStatus } from './types.ts';
 
 export function StatCard({ count, label, color, icon, onClick }: any) {
   return (
-    <button onClick={onClick} className={`${color} p-5 rounded-[32px] text-white flex flex-col justify-between h-40 text-left shadow-lg relative overflow-hidden active:scale-95 transition-all`}>
-      <div className="absolute -right-4 -top-4 opacity-10">{React.cloneElement(icon, { size: 100 })}</div>
+    <button onClick={onClick} className={`${color} p-5 rounded-[32px] text-white flex flex-col justify-between h-40 text-left shadow-lg relative overflow-hidden active:scale-95 transition-all group`}>
+      <div className="absolute -right-4 -top-4 opacity-10 group-hover:scale-110 transition-transform">{React.cloneElement(icon, { size: 100 })}</div>
       <div className="bg-white/20 w-10 h-10 rounded-2xl flex items-center justify-center backdrop-blur-sm shadow-inner">{React.cloneElement(icon, { size: 18 })}</div>
-      <div><h3 className="text-3xl font-black italic leading-none">{count}</h3><p className="text-[10px] font-black uppercase opacity-70 tracking-widest">{label}</p></div>
+      <div>
+        <h3 className="text-4xl font-black italic leading-none mb-1">{count}</h3>
+        <p className="text-[10px] font-black uppercase opacity-70 tracking-widest flex items-center gap-1">
+          {label} <ChevronRight size={10}/>
+        </p>
+      </div>
     </button>
   );
 }
@@ -21,34 +26,92 @@ export function SidebarItem({ icon, label, active, onClick, danger }: any) {
   );
 }
 
-export function NavBtn({ icon, active, onClick }: any) {
+export function NavBtn({ icon, label, active, onClick }: any) {
   return (
-    <button onClick={onClick} className={`p-4 rounded-2xl transition-all ${active ? 'text-indigo-600 bg-indigo-50 shadow-inner' : 'text-slate-300'}`}>
-      {React.cloneElement(icon, { size: 22 })}
+    <button 
+      onClick={onClick} 
+      className={`flex flex-col items-center justify-center gap-1.5 transition-all flex-1 py-1 ${active ? 'text-indigo-600 scale-105' : 'text-slate-300'}`}
+    >
+      <div className={`p-2 rounded-xl transition-all ${active ? 'bg-indigo-50 shadow-inner' : ''}`}>
+        {React.cloneElement(icon, { size: 20 })}
+      </div>
+      <span className={`text-[8px] font-black uppercase tracking-tighter text-center leading-none ${active ? 'text-indigo-600' : 'text-slate-400 opacity-60'}`}>
+        {label}
+      </span>
     </button>
   );
 }
 
 export function OrderCard({ order, onClick }: any) {
+  const statusColors = {
+    [OrderStatus.PENDING]: 'bg-orange-100 text-orange-600 border-orange-200',
+    [OrderStatus.COMPLETED]: 'bg-emerald-100 text-emerald-600 border-emerald-200',
+    [OrderStatus.DISPATCHED]: 'bg-indigo-100 text-indigo-600 border-indigo-200',
+    [OrderStatus.ARCHIVED]: 'bg-slate-100 text-slate-500 border-slate-200'
+  };
+
   return (
-    <div onClick={onClick} className="bg-white p-6 rounded-[32px] border-2 border-slate-100 shadow-sm relative overflow-hidden active:scale-95 transition-all">
-      {order.source === 'IA' && <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[7px] font-black px-3 py-1.5 rounded-bl-2xl uppercase tracking-[0.2em] flex items-center gap-1.5"><Sparkles size={10}/> IA</div>}
-      <div className="flex justify-between items-start mb-3">
-        <div>
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-[9px] font-black text-slate-300 uppercase leading-none">#{order.orderNumber}</span>
-            <span className="text-[9px] font-black text-slate-400 uppercase leading-none flex items-center gap-0.5">
-               <Hash size={8} /> {order.customerNumber || '---'}
-            </span>
-          </div>
-          <span className="text-[10px] font-black text-indigo-600 block italic">{order.locality}</span>
+    <div onClick={onClick} className="bg-white rounded-[35px] border-2 border-slate-100 shadow-sm relative overflow-hidden active:scale-[0.98] transition-all flex h-auto min-h-[160px]">
+      {order.source === 'IA' && (
+        <div className="absolute top-0 left-0 bg-emerald-500 text-white text-[7px] font-black px-3 py-1.5 rounded-br-2xl uppercase tracking-[0.2em] flex items-center gap-1.5 z-10 shadow-sm">
+          <Sparkles size={10}/> IA
         </div>
-        <span className={`text-[8px] font-black px-3 py-1.5 rounded-xl uppercase tracking-widest ${order.status === OrderStatus.PENDING ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>{order.status}</span>
+      )}
+
+      {/* LADO IZQUIERDO: Detalles agrandados */}
+      <div className="flex-1 p-6 flex flex-col justify-between border-r border-slate-50">
+        <div>
+          <div className="flex items-center gap-2 mb-2 opacity-40">
+            <span className="text-[11px] font-black uppercase tracking-tighter">PEDIDO N° {order.orderNumber}</span>
+            <span className="h-3 w-px bg-slate-300"></span>
+            <span className="text-[11px] font-black uppercase tracking-tighter">CTA {order.customerNumber || '---'}</span>
+          </div>
+          
+          <h3 className="font-black text-slate-900 text-xl uppercase italic leading-tight mb-1">
+            {order.customerName}
+          </h3>
+          
+          <div className="flex items-center gap-1.5 text-indigo-600 mb-4">
+            <MapPin size={14} className="flex-shrink-0" />
+            <span className="text-[12px] font-black uppercase italic tracking-tight">{order.locality}</span>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 self-start px-4 py-2 rounded-2xl flex items-center gap-2">
+          <Package size={16} className="text-slate-400" />
+          <span className="text-sm font-black text-slate-700">{order.packageQuantity || 0} <span className="text-[10px] text-slate-400 uppercase ml-1">Bultos Totales</span></span>
+        </div>
       </div>
-      <h3 className="font-black text-slate-800 text-lg truncate uppercase italic leading-none">{order.customerName}</h3>
-      <div className="flex items-center justify-between border-t border-slate-50 pt-4 text-[10px] font-black text-slate-400">
-         <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl"><Package size={14}/> {order.packageQuantity || 0} BULTOS</div>
-         {order.carrier && <span className="text-indigo-500 italic flex items-center gap-1.5 bg-indigo-50 px-3 py-1.5 rounded-xl"><Truck size={12}/> {order.carrier}</span>}
+
+      {/* LADO DERECHO: Etapa y Responsables */}
+      <div className="w-[35%] bg-slate-50/50 p-6 flex flex-col gap-4">
+        <div className={`text-[9px] font-black px-3 py-2 rounded-xl uppercase tracking-widest text-center border ${statusColors[order.status as OrderStatus] || statusColors[OrderStatus.ARCHIVED]}`}>
+          {order.status}
+        </div>
+
+        <div className="space-y-3">
+          {/* Responsables Preparado */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 opacity-30">
+              <Users size={10} />
+              <span className="text-[7px] font-black uppercase tracking-widest">Preparado por:</span>
+            </div>
+            <p className="text-[10px] font-black text-slate-700 uppercase leading-none truncate">
+              {order.reviewer || 'Pte. Asignar'}
+            </p>
+          </div>
+
+          {/* Responsable Despacho */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 opacity-30">
+              <Truck size={10} />
+              <span className="text-[7px] font-black uppercase tracking-widest">Despacho por:</span>
+            </div>
+            <p className="text-[10px] font-black text-indigo-600 uppercase leading-none truncate">
+              {order.dispatchValue || order.carrier || 'Pte. Despacho'}
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   );
