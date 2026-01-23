@@ -108,6 +108,7 @@ export default function App() {
   const handleUpdateOrder = async (updatedOrder: Order) => {
     setIsSaving(true);
     try {
+      console.log("Sincronizando con Supabase ID:", updatedOrder.id);
       const { error } = await supabase.from('orders').update({
         status: updatedOrder.status,
         notes: updatedOrder.notes,
@@ -125,12 +126,17 @@ export default function App() {
         reviewer: updatedOrder.reviewer
       }).eq('id', updatedOrder.id);
       
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase Update Error:", error);
+        throw error;
+      }
+      
       await fetchOrders();
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err) {
-      alert("Error al actualizar la base de datos.");
+      console.error("Catch error in handleUpdateOrder:", err);
+      alert("Error crítico de base de datos. Verifica la consola.");
       return false;
     } finally {
       setIsSaving(false);

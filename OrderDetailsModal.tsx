@@ -18,14 +18,11 @@ interface OrderDetailsModalProps {
 export default function OrderDetailsModal({ 
   order, onClose, onUpdate, onDelete, isSaving 
 }: OrderDetailsModalProps) {
-  // Estado de Solo Lectura si el pedido ya está FINALIZADO
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
   
-  // Estados para el sistema de colaboradores (+)
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
   const [newCollabInput, setNewCollabInput] = useState('');
   
-  // Opciones de configuración
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
   const packageTypes = ["CAJA", "BOLSA:", "PAQUETE", "BOBINA", "OTROS:"];
   const dispatchMainTypes = ["VIAJANTES", "VENDEDORES", "TRANSPORTE", "RETIRO PERSONAL"];
@@ -49,17 +46,17 @@ export default function OrderDetailsModal({
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
 
-  // --- CORRECCIÓN: LÓGICA DE AVANCE DE ETAPA ---
+  // --- LÓGICA DE AVANCE DE ETAPA (CORREGIDA PARA FUNCIONAR CON LA BD) ---
   const handleConfirmStage = async () => {
     if (isSaving || isReadOnly) return;
 
-    // Definición de flujo de estados
+    // Progresión lógica de estados
     let nextStatus: OrderStatus = order.status;
     if (order.status === OrderStatus.PENDING) nextStatus = OrderStatus.COMPLETED;
     else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
     else if (order.status === OrderStatus.DISPATCHED) nextStatus = OrderStatus.ARCHIVED;
 
-    // Recolectar datos actuales del formulario
+    // Consolidar valores finales (manejo de "Otros")
     const finalWarehouse = warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection;
     const finalPackageType = packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection;
     const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
@@ -76,12 +73,15 @@ export default function OrderDetailsModal({
       dispatchValue: finalDispatchValue
     };
 
-    // Actualizar en base de datos (Supabase)
+    console.log("Intentando actualizar pedido...", updatedOrder);
     const success = await onUpdate(updatedOrder);
     
-    // Si fue exitoso, cerramos para refrescar la lista
     if (success) {
-      onClose();
+      console.log("Actualización exitosa en BD.");
+      onClose(); // Cerramos solo si la BD respondió correctamente
+    } else {
+      console.error("Error: La actualización no se reflejó en la base de datos.");
+      alert("No se pudo confirmar la etapa. Verifica tu conexión a internet o las credenciales de la base de datos.");
     }
   };
 
@@ -93,19 +93,14 @@ export default function OrderDetailsModal({
       return;
     }
 
-    // Procesamos la entrada: separamos por comas y limpiamos
     const newNames = input.split(',')
       .map(n => n.trim().toUpperCase())
       .filter(n => n !== "");
 
-    // Nombres actuales
     const existingNames = order.reviewer ? order.reviewer.split(',').map(n => n.trim()) : [];
-    
-    // Unimos evitando duplicados
     const combined = Array.from(new Set([...existingNames, ...newNames]));
     const finalReviewerString = combined.join(', ');
 
-    // Guardar cambio de responsable inmediatamente
     const success = await onUpdate({ ...order, reviewer: finalReviewerString });
     
     if (success) {
@@ -118,23 +113,22 @@ export default function OrderDetailsModal({
     <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[700] flex items-center justify-center p-4">
       <div className="bg-white w-full max-md rounded-[50px] p-8 shadow-2xl relative overflow-y-auto max-h-[95vh] no-scrollbar border border-white/20">
         
-        {/* X para cerrar */}
         <button onClick={onClose} className="absolute top-6 right-8 p-2.5 bg-slate-100 text-slate-400 hover:text-red-500 rounded-full transition-all z-[850] shadow-sm active:scale-90">
           <X size={24} strokeWidth={3}/>
         </button>
 
         <div className="pt-10 space-y-8">
           
-          {/* CABECERA: PEDIDO Y RESPONSABLES ASIGNADOS */}
+          {/* CABECERA: PEDIDO Y CELDA DE RESPONSABLES */}
           <div className="flex justify-between items-center px-2">
             <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">PEDIDO {order.orderNumber || '---'}</span>
             </div>
 
             <div className="flex items-center gap-2 relative">
-              {/* Visualización de responsables (Sin celda de edición directa) */}
-              <div className="bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-white/10 min-w-[140px] max-w-[180px] justify-center overflow-hidden">
-                <Users size={14} className="text-orange-500 flex-shrink-0" />
+              {/* Celda de responsables (Solo Lectura) */}
+              <div className="bg-slate-100 border-2 border-slate-200 text-slate-900 px-5 py-3 rounded-2xl shadow-inner flex items-center gap-3 min-w-[140px] max-w-[220px] justify-center overflow-hidden">
+                <Users size={14} className="text-indigo-500 flex-shrink-0" />
                 <span className="text-[10px] font-black uppercase tracking-tight truncate">
                   {order.reviewer || 'SIN ASIGNAR'}
                 </span>
@@ -149,14 +143,13 @@ export default function OrderDetailsModal({
                     <UserPlus size={20} strokeWidth={3}/>
                   </button>
 
-                  {/* Popover del botón (+) */}
                   {isAddingCollaborator && (
-                    <div className="absolute top-full right-0 mt-3 w-72 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.5)] rounded-[32px] p-6 z-[1000] animate-in zoom-in">
+                    <div className="absolute top-full right-0 mt-3 w-72 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.4)] rounded-[32px] p-6 z-[1000] animate-in zoom-in">
                       <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Agregar Responsable(s)</p>
                       <div className="flex gap-2">
                         <input 
                           className="flex-1 bg-slate-50 p-4 rounded-2xl text-xs font-black uppercase outline-none shadow-inner border border-transparent focus:border-indigo-100" 
-                          placeholder="NOMBRE(S)..." 
+                          placeholder="ESCRIBE NOMBRE(S)..." 
                           value={newCollabInput} 
                           onChange={e => setNewCollabInput(e.target.value)} 
                           autoFocus
@@ -166,7 +159,7 @@ export default function OrderDetailsModal({
                           <Check size={20} strokeWidth={4}/>
                         </button>
                       </div>
-                      <p className="text-[8px] text-slate-300 mt-3 uppercase font-bold leading-tight">Usa comas para múltiples nombres</p>
+                      <p className="text-[8px] text-slate-300 mt-3 uppercase font-bold leading-tight italic">Puedes separar varios con coma (,)</p>
                     </div>
                   )}
                 </div>
@@ -192,13 +185,13 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* FORMULARIO DE CARGA */}
+          {/* CONTROLES DE CARGA */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Depósito Origen</label>
               <select 
                 disabled={isReadOnly} 
-                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 transition-all" 
+                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 transition-all" 
                 value={warehouseSelection} 
                 onChange={e => setWarehouseSelection(e.target.value)}
               >
@@ -209,7 +202,7 @@ export default function OrderDetailsModal({
               <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Formato Bulto</label>
               <select 
                 disabled={isReadOnly} 
-                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 transition-all" 
+                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 transition-all" 
                 value={packageTypeSelection} 
                 onChange={e => setPackageTypeSelection(e.target.value)}
               >
@@ -224,7 +217,7 @@ export default function OrderDetailsModal({
               <input 
                 disabled={isReadOnly} 
                 type="number" 
-                className="w-full bg-transparent text-4xl font-black text-indigo-700 outline-none text-center mt-1 disabled:opacity-30" 
+                className="w-full bg-transparent text-4xl font-black text-indigo-700 outline-none text-center mt-1" 
                 value={currentQty || ''} 
                 placeholder="0" 
                 onChange={e => setCurrentQty(parseInt(e.target.value) || 0)} 
@@ -249,7 +242,7 @@ export default function OrderDetailsModal({
             </button>
           )}
 
-          {/* LISTA DE CARGAS REALIZADAS */}
+          {/* LISTA DE CARGAS */}
           {confirmedEntries.length > 0 && (
             <div className="space-y-2 max-h-40 overflow-y-auto no-scrollbar p-1">
               {confirmedEntries.map(e => (
@@ -279,7 +272,7 @@ export default function OrderDetailsModal({
              </h3>
              <select 
                disabled={isReadOnly} 
-               className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none focus:bg-white/20 transition-all disabled:opacity-50" 
+               className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none focus:bg-white/20 transition-all" 
                value={dispatchTypeSelection} 
                onChange={e => setDispatchTypeSelection(e.target.value)}
              >
@@ -288,7 +281,7 @@ export default function OrderDetailsModal({
              {dispatchOptions[dispatchTypeSelection] && (
                <select 
                  disabled={isReadOnly} 
-                 className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none focus:bg-white/20 transition-all disabled:opacity-50" 
+                 className="w-full bg-white/10 border border-white/20 rounded-2xl py-4 px-4 text-[11px] font-black uppercase outline-none focus:bg-white/20 transition-all" 
                  value={dispatchValueSelection} 
                  onChange={e => setDispatchValueSelection(e.target.value)}
                >
@@ -298,7 +291,7 @@ export default function OrderDetailsModal({
              )}
           </div>
 
-          {/* BOTONERA PRINCIPAL CORREGIDA */}
+          {/* BOTONERA DE ACCIÓN CORREGIDA */}
           <div className="space-y-4 pb-4">
             {!isReadOnly ? (
               <button 
@@ -311,12 +304,12 @@ export default function OrderDetailsModal({
               </button>
             ) : (
               <div className="bg-slate-50 p-6 rounded-[32px] text-center border-2 border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">PEDIDO EN HISTORIAL (SOLO LECTURA)</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">PEDIDO EN HISTORIAL</p>
               </div>
             )}
             
             <button 
-              onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido: ' + order.customerName + ' está ' + order.status)}`)} 
+              onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido de ' + order.customerName + ' ha avanzado a la etapa: ' + order.status)}`)} 
               className="w-full bg-emerald-500 text-white py-5 rounded-[32px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg hover:bg-emerald-600 transition-all active:scale-95 border-b-4 border-emerald-700"
             >
               <MessageCircle size={22} className="fill-white"/> NOTIFICAR WHATSAPP
