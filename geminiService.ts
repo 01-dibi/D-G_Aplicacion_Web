@@ -1,25 +1,34 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Always initialize with the direct environment variable as per guidelines.
+// Inicialización con la variable de entorno obligatoria
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Función para analizar texto (WhatsApp)
+/**
+ * Procesa texto (mensajes de WhatsApp/Informales) para extraer datos de logística.
+ */
 export async function analyzeOrderText(text: string) {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Analiza el siguiente texto de un pedido. EXTRAE ÚNICAMENTE el nombre del cliente y la localidad. 
-      IMPORTANTE: Ignora por completo cualquier lista de productos, artículos o mercadería. No incluyas detalles de qué contiene el pedido.
+      contents: `Extrae ÚNICAMENTE el nombre del cliente y la localidad del siguiente mensaje de pedido. 
+      INSTRUCCIÓN CRÍTICA: Ignora por completo cualquier lista de productos, artículos, cantidades o precios. 
+      Solo nos interesa quién es el cliente y a dónde va el envío.
       
-      Texto a analizar: "${text}"`,
+      Mensaje: "${text}"`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            customerName: { type: Type.STRING },
-            locality: { type: Type.STRING, description: "Ciudad o localidad del cliente" }
+            customerName: { 
+              type: Type.STRING, 
+              description: "Nombre de la razón social o comercio" 
+            },
+            locality: { 
+              type: Type.STRING, 
+              description: "Ciudad, pueblo o localidad del destino" 
+            }
           },
           required: ["customerName", "locality"]
         }
@@ -28,12 +37,14 @@ export async function analyzeOrderText(text: string) {
 
     return JSON.parse(response.text || '{}');
   } catch (error) {
-    console.error("Error Gemini:", error);
+    console.error("Error en Gemini Text Analysis:", error);
     return null;
   }
 }
 
-// Función para analizar fotos o PDFs
+/**
+ * Procesa imágenes (Fotos de remitos) o PDFs utilizando capacidades multimodales.
+ */
 export async function analyzeOrderMedia(base64Data: string, mimeType: string) {
   try {
     const response = await ai.models.generateContent({
@@ -47,7 +58,7 @@ export async function analyzeOrderMedia(base64Data: string, mimeType: string) {
             }
           },
           {
-            text: "Analiza esta imagen o documento de un pedido. Extrae el nombre del cliente (razón social) y la localidad. Ignora los productos e información irrelevante."
+            text: "Analiza este documento de pedido. Extrae ÚNICAMENTE el nombre del cliente (razón social) y la localidad. Ignora productos, ítems, precios y firmas. Responde solo con el JSON solicitado."
           }
         ]
       },
@@ -66,7 +77,7 @@ export async function analyzeOrderMedia(base64Data: string, mimeType: string) {
 
     return JSON.parse(response.text || '{}');
   } catch (error) {
-    console.error("Error Gemini Media:", error);
+    console.error("Error en Gemini Media Analysis:", error);
     return null;
   }
 }

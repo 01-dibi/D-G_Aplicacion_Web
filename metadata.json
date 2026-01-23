@@ -1,8 +1,5 @@
 {
-  "name": "D&G_Logistica_Pro",
-  "description": "Versión 2.0 - Inteligencia de Última Milla con Mapas, Firma Digital y Prueba de Entrega.",
-  "requestFramePermissions": [
-    "camera",
-    "geolocation"
-  ]
+  "name": "D&G_Logistica_Admin",
+  "description": "Versión 2.0 Lite - Gestión Administrativa Pura de Pedidos.",
+  "requestFramePermissions": []
 }

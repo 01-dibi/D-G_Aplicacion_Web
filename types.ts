@@ -14,13 +14,8 @@ export interface PackagingEntry {
 }
 
 export interface DeliveryData {
-  photo?: string; // Base64
-  signature?: string; // Base64
-  coordinates?: {
-    lat: number;
-    lng: number;
-  };
   deliveredAt?: string;
+  notes?: string;
 }
 
 export interface Order {
@@ -34,9 +29,14 @@ export interface Order {
   reviewer?: string;
   notes: string;
   carrier?: string; 
+  warehouse?: string;
+  packageType?: string;
+  packageQuantity?: number;
+  dispatchType?: string;
+  dispatchValue?: string;
   createdAt: string;
   source: 'IA' | 'Manual';
   deliveryData?: DeliveryData;
 }
 
-export type View = 'DASHBOARD' | 'PENDING' | 'COMPLETED' | 'DISPATCHED' | 'NEW_ORDER_MANUAL' | 'ALL' | 'TRACKING' | 'MAP' | 'DELIVERY_FLOW' | 'CARRIERS' | 'MAINTENANCE';
+export type View = 'DASHBOARD' | 'PENDING' | 'COMPLETED' | 'DISPATCHED' | 'ALL' | 'MAINTENANCE';
