@@ -105,11 +105,13 @@ export default function App() {
     );
   }, [orders, view, searchTerm]);
 
+  // ESTRATEGIA DE GUARDADO SEGURO
   const handleUpdateOrder = async (updatedOrder: Order) => {
     setIsSaving(true);
     try {
-      console.log("Sincronizando con Supabase ID:", updatedOrder.id);
-      const { error } = await supabase.from('orders').update({
+      console.log("Sincronizando ID:", updatedOrder.id);
+      
+      const fullPayload = {
         status: updatedOrder.status,
         notes: updatedOrder.notes,
         carrier: updatedOrder.carrier,
@@ -124,19 +126,39 @@ export default function App() {
         locality: updatedOrder.locality,
         order_number: updatedOrder.orderNumber,
         reviewer: updatedOrder.reviewer
-      }).eq('id', updatedOrder.id);
+      };
+
+      const { error } = await supabase.from('orders').update(fullPayload).eq('id', updatedOrder.id);
       
       if (error) {
-        console.error("Supabase Update Error:", error);
-        throw error;
+        // Error de columna inexistente (PGRST204)
+        if (error.code === 'PGRST204' || error.message?.includes('column')) {
+          console.warn("Faltan columnas en la base de datos. Intentando guardado básico...");
+          
+          const basicPayload = {
+            status: updatedOrder.status,
+            customer_name: updatedOrder.customerName,
+            locality: updatedOrder.locality,
+            order_number: updatedOrder.orderNumber,
+            notes: updatedOrder.notes
+          };
+
+          const { error: fallbackError } = await supabase.from('orders').update(basicPayload).eq('id', updatedOrder.id);
+          
+          if (fallbackError) throw fallbackError;
+
+          alert("⚠️ AVISO: La tabla 'orders' en Supabase no tiene las nuevas columnas (dispatch_type, package_type, etc.). Se guardó solo el estado y datos básicos.\n\nPor favor, ejecuta el script SQL para actualizar la tabla.");
+        } else {
+          throw error;
+        }
       }
       
       await fetchOrders();
       setSelectedOrder(updatedOrder);
       return true;
-    } catch (err) {
-      console.error("Catch error in handleUpdateOrder:", err);
-      alert("Error crítico de base de datos. Verifica la consola.");
+    } catch (err: any) {
+      console.error("Error crítico en handleUpdateOrder:", err);
+      alert(`Error de sincronización: ${err.message || 'Error desconocido'}`);
       return false;
     } finally {
       setIsSaving(false);
