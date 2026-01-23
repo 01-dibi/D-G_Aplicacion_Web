@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, MapPin, Plus, UserPlus, ChevronDown, Package, Trash, Save, Check, MessageCircle, Trash2, Hash 
 } from 'lucide-react';
@@ -12,10 +12,11 @@ interface OrderDetailsModalProps {
   onUpdate: (updated: Order) => Promise<boolean>;
   onDelete: (id: string) => Promise<void>;
   isSaving: boolean;
+  currentUserName?: string;
 }
 
 export default function OrderDetailsModal({ 
-  order, allOrders, onClose, onUpdate, onDelete, isSaving 
+  order, allOrders, onClose, onUpdate, onDelete, isSaving, currentUserName 
 }: OrderDetailsModalProps) {
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
   const [isAddingOrderNum, setIsAddingOrderNum] = useState(false);
@@ -38,6 +39,13 @@ export default function OrderDetailsModal({
   const [dispatchTypeSelection, setDispatchTypeSelection] = useState(order.dispatchType || dispatchMainTypes[0]);
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
+
+  // Lógica para asignar automáticamente al responsable si está vacío
+  useEffect(() => {
+    if (!order.reviewer && currentUserName) {
+      onUpdate({ ...order, reviewer: currentUserName.toUpperCase() });
+    }
+  }, []);
 
   const totalConfirmedQuantity = useMemo(() => {
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
@@ -87,7 +95,7 @@ export default function OrderDetailsModal({
   return (
     <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[700] flex items-center justify-center p-4">
       <div className="bg-white w-full max-md rounded-[48px] p-10 shadow-2xl relative overflow-y-auto max-h-[95vh] no-scrollbar">
-        <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-red-500 transition-colors"><X/></button>
+        <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-red-500 transition-colors z-[850]"><X/></button>
 
         <div className="space-y-6">
           <div className="flex justify-between items-center relative">
@@ -95,7 +103,7 @@ export default function OrderDetailsModal({
               <span className="text-[10px] font-black text-slate-500 uppercase">ORDEN {order.orderNumber || '---'}</span>
               <button onClick={() => setIsAddingOrderNum(!isAddingOrderNum)} className="p-1.5 bg-slate-50 rounded-lg border border-slate-100 hover:bg-slate-100 transition-all"><Plus size={12}/></button>
               {isAddingOrderNum && (
-                <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-slate-200 shadow-2xl rounded-2xl p-4 z-[800]">
+                <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-slate-200 shadow-2xl rounded-2xl p-4 z-[900] animate-in zoom-in duration-200">
                   <h4 className="text-[9px] font-black text-slate-400 uppercase mb-3 italic">Vincular Pedidos</h4>
                   {siblingOrders.length > 0 ? siblingOrders.map(o => (
                     <button key={o.id} onClick={() => handleLinkOrderNumber(o)} className="w-full text-left p-3 rounded-xl hover:bg-indigo-50 text-[10px] font-bold border border-transparent hover:border-indigo-100 mb-1">#{o.orderNumber} - {o.locality}</button>
@@ -103,29 +111,44 @@ export default function OrderDetailsModal({
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className="bg-indigo-50 px-2 py-1 rounded-xl text-[9px] font-black text-indigo-600 uppercase tracking-tight">{order.reviewer || 'SIN ASIGNAR'}</div>
-              <button onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} className="p-1.5 bg-indigo-50 rounded-lg text-indigo-500 border border-indigo-100 hover:bg-indigo-100 transition-all"><UserPlus size={12}/></button>
+            <div className="flex items-center gap-1.5 relative">
+              <div className="bg-indigo-600 px-3 py-1.5 rounded-xl text-[9px] font-black text-white uppercase tracking-tight shadow-md">
+                {order.reviewer || 'SIN RESPONSABLE'}
+              </div>
+              <button 
+                onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} 
+                className="p-1.5 bg-indigo-50 rounded-lg text-indigo-500 border border-indigo-100 hover:bg-indigo-100 transition-all shadow-sm"
+              >
+                <UserPlus size={14}/>
+              </button>
+              
               {isAddingCollaborator && (
-                <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 shadow-2xl rounded-2xl p-4 z-[800]">
-                  <h4 className="text-[9px] font-black text-slate-400 uppercase mb-3 italic">Colaborador</h4>
+                <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 shadow-2xl rounded-2xl p-5 z-[950] animate-in zoom-in duration-200">
+                  <h4 className="text-[9px] font-black text-slate-400 uppercase mb-3 italic">Añadir Colaborador</h4>
                   <div className="flex gap-2">
-                    <input className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none shadow-inner" placeholder="NOMBRE..." value={newCollab} onChange={e => setNewCollab(e.target.value)} />
-                    <button onClick={handleAddCollaborator} className="bg-indigo-600 text-white p-3 rounded-xl shadow-md"><Check size={14}/></button>
+                    <input 
+                      className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none shadow-inner border border-transparent focus:border-indigo-200" 
+                      placeholder="NOMBRE..." 
+                      value={newCollab} 
+                      onChange={e => setNewCollab(e.target.value)} 
+                    />
+                    <button onClick={handleAddCollaborator} className="bg-indigo-600 text-white p-3 rounded-xl shadow-lg active:scale-90 transition-all">
+                      <Check size={14}/>
+                    </button>
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          <div className="text-center">
+          <div className="text-center pt-2">
             <h2 className="text-4xl font-black italic uppercase leading-none tracking-tighter text-slate-900">{order.customerName}</h2>
-            <div className="flex items-center justify-center gap-3 mt-2">
+            <div className="flex items-center justify-center gap-3 mt-3">
               <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-400 uppercase italic">
                 <Hash size={14} className="opacity-50" />
                 <span>N° CTA: {order.customerNumber || 'S/N'}</span>
               </div>
-              <span className="text-slate-200">|</span>
+              <span className="text-slate-200 font-light">|</span>
               <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-600 uppercase italic">
                 <MapPin size={14}/>
                 <span>{order.locality}</span>

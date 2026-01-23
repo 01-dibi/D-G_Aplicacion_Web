@@ -272,6 +272,7 @@ export default function App() {
           onUpdate={handleUpdateOrder}
           onDelete={handleDeleteOrder}
           isSaving={isSaving}
+          currentUserName={currentUser?.name}
         />
       )}
 
