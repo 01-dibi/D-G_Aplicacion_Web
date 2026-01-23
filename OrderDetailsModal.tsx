@@ -206,10 +206,28 @@ export default function OrderDetailsModal({
             <div className="space-y-1.5">
               <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Depósito Origen</label>
               <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 transition-all" value={warehouseSelection} onChange={e => setWarehouseSelection(e.target.value)}>{warehouses.map(w => <option key={w}>{w}</option>)}</select>
+              {warehouseSelection === 'Otros:' && !isReadOnly && (
+                <input 
+                  type="text" 
+                  placeholder="ANOTACIÓN..." 
+                  className="w-full mt-2 bg-white border-2 border-slate-100 py-3 px-4 rounded-xl text-[10px] font-black uppercase outline-none focus:border-indigo-300 animate-in fade-in duration-300" 
+                  value={customWarehouseText} 
+                  onChange={e => setCustomWarehouseText(e.target.value)} 
+                />
+              )}
             </div>
             <div className="space-y-1.5">
               <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Formato Bulto</label>
               <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 transition-all" value={packageTypeSelection} onChange={e => setPackageTypeSelection(e.target.value)}>{packageTypes.map(t => <option key={t}>{t}</option>)}</select>
+              {packageTypeSelection === 'OTROS:' && !isReadOnly && (
+                <input 
+                  type="text" 
+                  placeholder="ANOTACIÓN..." 
+                  className="w-full mt-2 bg-white border-2 border-slate-100 py-3 px-4 rounded-xl text-[10px] font-black uppercase outline-none focus:border-indigo-300 animate-in fade-in duration-300" 
+                  value={customPackageTypeText} 
+                  onChange={e => setCustomPackageTypeText(e.target.value)} 
+                />
+              )}
             </div>
           </div>
 
@@ -226,7 +244,7 @@ export default function OrderDetailsModal({
           </div>
 
           {!isReadOnly && (
-            <button onClick={() => { if (currentQty <= 0) return; setConfirmedEntries([...confirmedEntries, { id: Date.now().toString(), deposit: warehouseSelection, type: packageTypeSelection, quantity: currentQty }]); setCurrentQty(0); }} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all hover:bg-black"><Plus size={22} strokeWidth={4}/> CONFIRMAR CARGA</button>
+            <button onClick={() => { if (currentQty <= 0) return; setConfirmedEntries([...confirmedEntries, { id: Date.now().toString(), deposit: warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection, type: packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection, quantity: currentQty }]); setCurrentQty(0); }} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all hover:bg-black"><Plus size={22} strokeWidth={4}/> CONFIRMAR CARGA</button>
           )}
 
           {confirmedEntries.length > 0 && (
