@@ -203,15 +203,22 @@ export default function App() {
 
     setIsSaving(true);
     try {
-      // Borramos todos los registros donde el ID no sea nulo (esto borra todo)
-      const { error } = await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      // Usamos un filtro universal que funciona tanto para IDs de tipo Entero como UUID.
+      // '.not('id', 'is', null)' es la forma más segura de borrar todos los registros 
+      // cuando el cliente de Supabase requiere un filtro (por RLS o configuración).
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .filter('id', 'not.is', null);
+
       if (error) throw error;
       
       alert("✅ Base de datos reseteada con éxito. La aplicación está lista para entregar con cero registros.");
       setView('DASHBOARD');
       fetchOrders();
     } catch (err: any) {
-      alert(`Error al limpiar la base de datos: ${err.message}`);
+      console.error("Error al resetear base de datos:", err);
+      alert(`Error al limpiar la base de datos: ${err.message || 'Error desconocido'}. Verifique que las políticas de DELETE estén habilitadas en Supabase.`);
     } finally {
       setIsSaving(false);
     }
