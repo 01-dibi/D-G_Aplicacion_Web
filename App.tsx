@@ -73,6 +73,32 @@ export default function App() {
     }
   };
 
+  // EFECTO DE TIEMPO REAL: Suscripción a cambios en la base de datos
+  useEffect(() => {
+    if (!currentUser || !connectionStatus.isConfigured) return;
+
+    // Escuchar cualquier cambio en la tabla 'orders'
+    const channel = supabase
+      .channel('realtime_orders')
+      .on(
+        'postgres_changes',
+        {
+          event: '*', // Escuchar INSERT, UPDATE y DELETE
+          schema: 'public',
+          table: 'orders'
+        },
+        (payload) => {
+          console.log('Cambio detectado en tiempo real:', payload);
+          fetchOrders(); // Recargar la lista automáticamente
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
+
   useEffect(() => {
     if (currentUser) {
       setIsLandingMode(false);
@@ -127,21 +153,10 @@ export default function App() {
 
       const { error } = await supabase.from('orders').update(fullPayload).eq('id', updatedOrder.id);
       
-      if (error && (error.code === 'PGRST204' || error.message?.includes('column'))) {
-        const basicPayload = {
-          status: updatedOrder.status,
-          customer_name: updatedOrder.customerName,
-          locality: updatedOrder.locality,
-          order_number: updatedOrder.orderNumber,
-          notes: updatedOrder.notes
-        };
-        await supabase.from('orders').update(basicPayload).eq('id', updatedOrder.id);
-        alert("⚠️ AVISO: Columnas de despacho no encontradas. Se guardó solo el estado básico. Actualiza tu tabla en Supabase.");
-      } else if (error) {
-        throw error;
-      }
+      if (error) throw error;
       
-      await fetchOrders();
+      // No necesitamos llamar a fetchOrders() manualmente aquí porque la suscripción Realtime lo hará por nosotros
+      // Sin embargo, para una respuesta UI inmediata, actualizamos el modal seleccionado
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
@@ -165,7 +180,6 @@ export default function App() {
         source: newOrder.source || 'Manual'
       }]);
       if (error) throw error;
-      await fetchOrders();
       return true;
     } catch (err) {
       alert("Error al crear el pedido.");
@@ -181,7 +195,6 @@ export default function App() {
     try {
       await supabase.from('orders').delete().eq('id', orderId);
       setSelectedOrder(null);
-      await fetchOrders();
     } catch (err) {
       alert("Error al eliminar.");
     } finally {
