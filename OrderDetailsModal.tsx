@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { 
-  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon
+  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon, AlertTriangle, Eraser
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -20,15 +20,15 @@ export default function OrderDetailsModal({
 }: OrderDetailsModalProps) {
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
   
-  // Estados para Responsables
+  // Estados de la UI
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
   const [newCollabInput, setNewCollabInput] = useState('');
-  
-  // Estados para Vinculación de Pedidos (Agrupación)
   const [isLinkingOrder, setIsLinkingOrder] = useState(false);
   const [linkOrderInput, setLinkOrderInput] = useState('');
   const [linkedOrders, setLinkedOrders] = useState<Order[]>([order]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  // Configuración de opciones
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
   const packageTypes = ["CAJA", "BOLSA:", "PAQUETE", "BOBINA", "OTROS:"];
   const dispatchMainTypes = ["VIAJANTES", "VENDEDORES", "TRANSPORTE", "RETIRO PERSONAL"];
@@ -37,6 +37,7 @@ export default function OrderDetailsModal({
     "VENDEDORES": ["MAURO", "GUSTAVO"]
   };
 
+  // Estados del formulario
   const [warehouseSelection, setWarehouseSelection] = useState(order.warehouse ? (warehouses.includes(order.warehouse) ? order.warehouse : 'Otros:') : warehouses[0]);
   const [customWarehouseText, setCustomWarehouseText] = useState(!warehouses.includes(order.warehouse || '') ? (order.warehouse || '') : '');
   const [packageTypeSelection, setPackageTypeSelection] = useState(order.packageType ? (packageTypes.includes(order.packageType) ? order.packageType : 'OTROS:') : packageTypes[0]);
@@ -47,29 +48,23 @@ export default function OrderDetailsModal({
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
 
-  // Calculamos el total de bultos del pedido actual más los pedidos vinculados
   const totalConfirmedQuantity = useMemo(() => {
     const currentModalTotal = confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
-    // Sumamos los bultos de los OTROS pedidos vinculados (excluyendo el actual que se está editando en el modal)
     const otherLinkedTotal = linkedOrders
       .filter(lo => lo.id !== order.id)
       .reduce((sum, lo) => sum + (lo.packageQuantity || 0), 0);
-    
     return currentModalTotal + otherLinkedTotal;
   }, [confirmedEntries, linkedOrders, order.id]);
 
   const handleLinkOrder = () => {
     const num = linkOrderInput.trim();
     if (!num) return;
-
-    // Buscamos el pedido en la lista global que coincida con el número y sea del mismo cliente
     const found = allOrders.find(o => 
       o.orderNumber === num && 
       o.customerNumber === order.customerNumber &&
       o.id !== order.id &&
       !linkedOrders.find(lo => lo.id === o.id)
     );
-
     if (found) {
       setLinkedOrders([...linkedOrders, found]);
       setLinkOrderInput('');
@@ -81,7 +76,6 @@ export default function OrderDetailsModal({
 
   const handleConfirmStage = async () => {
     if (isSaving || isReadOnly) return;
-
     let nextStatus: OrderStatus = order.status;
     if (order.status === OrderStatus.PENDING) nextStatus = OrderStatus.COMPLETED;
     else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
@@ -92,7 +86,6 @@ export default function OrderDetailsModal({
     const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
     const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
 
-    // Actualizamos el pedido principal
     const updatedMainOrder: Order = {
       ...order,
       status: nextStatus,
@@ -105,15 +98,12 @@ export default function OrderDetailsModal({
     };
 
     const successMain = await onUpdate(updatedMainOrder);
-    
     if (successMain) {
-      // Si hay pedidos vinculados, también los hacemos avanzar de etapa
       for (const lo of linkedOrders) {
         if (lo.id === order.id) continue;
         await onUpdate({
           ...lo,
           status: nextStatus,
-          // Opcionalmente copiamos datos de despacho si es necesario
           dispatchType: dispatchTypeSelection,
           dispatchValue: finalDispatchValue,
           reviewer: order.reviewer
@@ -133,7 +123,6 @@ export default function OrderDetailsModal({
     const existingNames = order.reviewer ? order.reviewer.split(',').map(n => n.trim()) : [];
     const combined = Array.from(new Set([...existingNames, ...newNames]));
     const finalReviewerString = combined.join(', ');
-
     const success = await onUpdate({ ...order, reviewer: finalReviewerString });
     if (success) {
       setNewCollabInput('');
@@ -141,9 +130,69 @@ export default function OrderDetailsModal({
     }
   };
 
+  // Función para limpieza parcial (Borrado parcial de datos de etapa)
+  const handlePartialDelete = async () => {
+    setIsAddingCollaborator(false);
+    const clearedOrder: Order = {
+      ...order,
+      detailedPackaging: [],
+      packageQuantity: 0,
+      reviewer: '',
+      warehouse: '',
+      packageType: '',
+      dispatchType: '',
+      dispatchValue: '',
+      carrier: ''
+    };
+    const success = await onUpdate(clearedOrder);
+    if (success) {
+      setConfirmedEntries([]);
+      setCurrentQty(0);
+      setShowDeleteConfirm(false);
+      alert("Datos de la etapa limpiados correctamente.");
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[700] flex items-center justify-center p-4">
       <div className="bg-white w-full max-md rounded-[50px] p-8 shadow-2xl relative overflow-y-auto max-h-[95vh] no-scrollbar border border-white/20">
+        
+        {/* Overlay de Confirmación de Eliminación */}
+        {showDeleteConfirm && (
+          <div className="absolute inset-0 bg-white/95 backdrop-blur-md z-[1000] flex flex-col items-center justify-center p-10 text-center animate-in fade-in duration-300">
+            <div className="bg-red-50 p-6 rounded-full mb-6">
+              <AlertTriangle size={48} className="text-red-500" />
+            </div>
+            <h3 className="text-2xl font-black italic uppercase text-slate-900 mb-2">Confirmar Eliminación</h3>
+            <p className="text-sm font-medium text-slate-500 mb-10 leading-relaxed">
+              ¿Cómo deseas proceder con este pedido? Puedes borrarlo permanentemente o solo limpiar los datos de esta etapa.
+            </p>
+            
+            <div className="w-full space-y-3">
+              <button 
+                onClick={() => onDelete(order.id)}
+                className="w-full bg-red-500 text-white py-5 rounded-[24px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all border-b-4 border-red-700"
+              >
+                <Trash size={18} strokeWidth={3}/> ELIMINACIÓN TOTAL
+              </button>
+              
+              <button 
+                onClick={handlePartialDelete}
+                className="w-full bg-orange-100 text-orange-600 py-5 rounded-[24px] font-black uppercase text-xs flex items-center justify-center gap-3 active:scale-95 transition-all border-b-4 border-orange-200"
+              >
+                <Eraser size={18} strokeWidth={3}/> LIMPIAR DATOS ETAPA
+              </button>
+              
+              <button 
+                onClick={() => setShowDeleteConfirm(false)}
+                className="w-full bg-slate-100 text-slate-500 py-4 rounded-[24px] font-black uppercase text-[10px] mt-4"
+              >
+                CANCELAR
+              </button>
+            </div>
+          </div>
+        )}
+
         <button onClick={onClose} className="absolute top-6 right-8 p-2.5 bg-slate-100 text-slate-400 hover:text-red-500 rounded-full transition-all z-[850] shadow-sm">
           <X size={24} strokeWidth={3}/>
         </button>
@@ -151,7 +200,6 @@ export default function OrderDetailsModal({
         <div className="pt-10 space-y-8">
           <div className="flex justify-between items-center px-2">
             <div className="flex items-center gap-2">
-              {/* Botón (+) para juntar pedidos */}
               {!isReadOnly && (
                 <div className="relative">
                   <button 
@@ -164,24 +212,16 @@ export default function OrderDetailsModal({
                     <div className="absolute top-full left-0 mt-3 w-64 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.4)] rounded-[28px] p-5 z-[1000] animate-in zoom-in slide-in-from-top-2">
                       <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Vincular otro Pedido</p>
                       <div className="flex gap-2">
-                        <input 
-                          className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none border border-transparent focus:border-orange-100" 
-                          placeholder="N° PEDIDO..." 
-                          value={linkOrderInput} 
-                          onChange={e => setLinkOrderInput(e.target.value)} 
-                          autoFocus 
-                          onKeyDown={(e) => e.key === 'Enter' && handleLinkOrder()} 
-                        />
+                        <input className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none border border-transparent focus:border-orange-100" placeholder="N° PEDIDO..." value={linkOrderInput} onChange={e => setLinkOrderInput(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleLinkOrder()} />
                         <button onClick={handleLinkOrder} className="bg-orange-500 text-white p-3 rounded-xl shadow-md"><Check size={18} strokeWidth={4}/></button>
                       </div>
-                      <p className="text-[8px] text-slate-300 mt-2 uppercase font-bold leading-tight italic">Debe ser del mismo cliente</p>
                     </div>
                   )}
                 </div>
               )}
 
               <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm flex flex-col">
-                <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">
+                <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-1">
                   {linkedOrders.length > 1 ? `PEDIDOS (${linkedOrders.length})` : 'PEDIDO INDIVIDUAL'}
                 </span>
                 <span className="text-[11px] font-black text-slate-700 uppercase tracking-tighter">
@@ -207,7 +247,6 @@ export default function OrderDetailsModal({
                         <input className="flex-1 bg-slate-50 p-4 rounded-2xl text-xs font-black uppercase outline-none shadow-inner border border-transparent focus:border-indigo-100" placeholder="NOMBRE(S)..." value={newCollabInput} onChange={e => setNewCollabInput(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleAddCollaborators()} />
                         <button onClick={handleAddCollaborators} className="bg-indigo-600 text-white p-4 rounded-2xl shadow-lg"><Check size={20} strokeWidth={4}/></button>
                       </div>
-                      <p className="text-[8px] text-slate-300 mt-3 uppercase font-bold leading-tight italic">Usa comas para varios nombres</p>
                     </div>
                   )}
                 </div>
@@ -242,11 +281,7 @@ export default function OrderDetailsModal({
             <div className="bg-orange-50/70 p-7 rounded-[35px] border-2 border-orange-100 text-center relative overflow-hidden">
               <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest relative z-10">Total Acum.</span>
               <p className="text-4xl font-black text-orange-700 mt-1 relative z-10">{totalConfirmedQuantity}</p>
-              {linkedOrders.length > 1 && (
-                <div className="absolute bottom-2 right-4 opacity-20 rotate-12 z-0">
-                   <LinkIcon size={40} className="text-orange-500" />
-                </div>
-              )}
+              {linkedOrders.length > 1 && <div className="absolute bottom-2 right-4 opacity-20 rotate-12 z-0"><LinkIcon size={40} className="text-orange-500" /></div>}
             </div>
           </div>
 
@@ -262,28 +297,6 @@ export default function OrderDetailsModal({
                   <div className="flex items-center gap-4"><span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black text-slate-900">{e.quantity}</span>{!isReadOnly && <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2 active:scale-90"><Trash size={20}/></button>}</div>
                 </div>
               ))}
-            </div>
-          )}
-
-          {/* Lista de pedidos vinculados si hay más de uno */}
-          {linkedOrders.length > 1 && (
-            <div className="bg-slate-50 p-6 rounded-[35px] border border-slate-200">
-               <h4 className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                 <LinkIcon size={12}/> Pedidos vinculados (avanzan juntos)
-               </h4>
-               <div className="flex flex-wrap gap-2">
-                 {linkedOrders.map(lo => (
-                   <div key={lo.id} className="bg-white border border-slate-200 px-3 py-1.5 rounded-xl flex items-center gap-2">
-                      <span className="text-[10px] font-black text-slate-700 uppercase">#{lo.orderNumber}</span>
-                      <span className="text-[8px] font-bold text-slate-400">({lo.packageQuantity || 0} b.)</span>
-                      {lo.id !== order.id && (
-                        <button onClick={() => setLinkedOrders(linkedOrders.filter(x => x.id !== lo.id))} className="text-red-400 hover:text-red-600">
-                          <X size={12} strokeWidth={3}/>
-                        </button>
-                      )}
-                   </div>
-                 ))}
-               </div>
             </div>
           )}
 
@@ -304,7 +317,14 @@ export default function OrderDetailsModal({
             )}
             <button onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido de ' + order.customerName + ' avanzado a etapa: ' + order.status)}`)} className="w-full bg-emerald-500 text-white py-5 rounded-[32px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg hover:bg-emerald-600 transition-all active:scale-95 border-b-4 border-emerald-700"><MessageCircle size={22} className="fill-white"/> NOTIFICAR WHATSAPP</button>
             <button onClick={onClose} className="w-full bg-slate-900 text-white py-5 rounded-[32px] font-black uppercase text-[11px] shadow-sm active:scale-95 border-b-4 border-slate-700 transition-all">CERRAR PANTALLA</button>
-            {!isReadOnly && <button onClick={() => onDelete(order.id)} className="w-full text-red-500 py-4 font-black uppercase text-[10px] border-2 border-red-50 rounded-2xl hover:bg-red-50 transition-colors mt-4">ELIMINAR REGISTRO</button>}
+            {!isReadOnly && (
+              <button 
+                onClick={() => setShowDeleteConfirm(true)} 
+                className="w-full text-red-500 py-4 font-black uppercase text-[10px] border-2 border-red-50 rounded-2xl hover:bg-red-50 transition-colors mt-4"
+              >
+                ELIMINAR REGISTRO
+              </button>
+            )}
           </div>
         </div>
       </div>
