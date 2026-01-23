@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
-  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus
+  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus, Settings, AlertTriangle, Trash2
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types.ts';
 import { supabase, connectionStatus } from './supabaseClient.ts';
@@ -73,23 +73,20 @@ export default function App() {
     }
   };
 
-  // EFECTO DE TIEMPO REAL: Suscripción a cambios en la base de datos
   useEffect(() => {
     if (!currentUser || !connectionStatus.isConfigured) return;
 
-    // Escuchar cualquier cambio en la tabla 'orders'
     const channel = supabase
       .channel('realtime_orders')
       .on(
         'postgres_changes',
         {
-          event: '*', // Escuchar INSERT, UPDATE y DELETE
+          event: '*',
           schema: 'public',
           table: 'orders'
         },
         (payload) => {
-          console.log('Cambio detectado en tiempo real:', payload);
-          fetchOrders(); // Recargar la lista automáticamente
+          fetchOrders();
         }
       )
       .subscribe();
@@ -150,13 +147,8 @@ export default function App() {
         order_number: updatedOrder.orderNumber,
         reviewer: updatedOrder.reviewer
       };
-
       const { error } = await supabase.from('orders').update(fullPayload).eq('id', updatedOrder.id);
-      
       if (error) throw error;
-      
-      // No necesitamos llamar a fetchOrders() manualmente aquí porque la suscripción Realtime lo hará por nosotros
-      // Sin embargo, para una respuesta UI inmediata, actualizamos el modal seleccionado
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
@@ -202,6 +194,29 @@ export default function App() {
     }
   };
 
+  const handleResetDatabase = async () => {
+    const firstConfirm = confirm("⚠️ ATENCIÓN: ¿Estás seguro de que deseas borrar TODOS los pedidos de la base de datos? Esta acción es irreversible.");
+    if (!firstConfirm) return;
+
+    const secondConfirm = confirm("🛑 ÚLTIMO AVISO: Se eliminarán Pendientes, Preparados, Despachados e Historial. ¿Confirmar limpieza total?");
+    if (!secondConfirm) return;
+
+    setIsSaving(true);
+    try {
+      // Borramos todos los registros donde el ID no sea nulo (esto borra todo)
+      const { error } = await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if (error) throw error;
+      
+      alert("✅ Base de datos reseteada con éxito. La aplicación está lista para entregar con cero registros.");
+      setView('DASHBOARD');
+      fetchOrders();
+    } catch (err: any) {
+      alert(`Error al limpiar la base de datos: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (isLandingMode) return <LandingScreen onSelectStaff={() => setIsLandingMode(false)} onSelectCustomer={() => { setIsLandingMode(false); setIsCustomerMode(true); }} />;
   if (isCustomerMode) return <CustomerPortal onBack={() => { setIsLandingMode(true); setIsCustomerMode(false); }} orders={orders} />;
   if (!currentUser) return <LoginModal onLogin={u => { setCurrentUser(u); localStorage.setItem('dg_user', JSON.stringify(u)); }} onBack={() => setIsLandingMode(true)} />;
@@ -229,6 +244,7 @@ export default function App() {
               <SidebarItem icon={<Truck size={20}/>} label="Despachados" active={view === 'DISPATCHED'} onClick={() => { setView('DISPATCHED'); setIsSidebarOpen(false); }} />
               <div className="h-px bg-slate-100 my-4" />
               <SidebarItem icon={<History size={20}/>} label="Historial" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
+              <SidebarItem icon={<Settings size={20}/>} label="Mantenimiento" active={view === 'MAINTENANCE'} onClick={() => { setView('MAINTENANCE'); setIsSidebarOpen(false); }} />
             </nav>
             <div className="p-4 border-t">
                <SidebarItem icon={<LogOut size={20}/>} label="Cerrar Sesión" onClick={() => { setCurrentUser(null); localStorage.removeItem('dg_user'); }} danger />
@@ -261,7 +277,38 @@ export default function App() {
           </div>
         )}
 
-        {!isLoading && view !== 'DASHBOARD' && (
+        {!isLoading && view === 'MAINTENANCE' && (
+          <div className="space-y-8 animate-in zoom-in duration-300 pt-4">
+             <div className="text-center space-y-2">
+                <div className="w-20 h-20 bg-red-50 text-red-500 rounded-[30px] flex items-center justify-center mx-auto shadow-inner mb-4">
+                  <Settings size={40} className="animate-pulse" />
+                </div>
+                <h2 className="text-2xl font-black italic uppercase text-slate-900">Mantenimiento</h2>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Herramientas del Sistema</p>
+             </div>
+
+             <div className="bg-white border-2 border-red-50 p-8 rounded-[40px] shadow-sm space-y-6">
+                <div className="flex items-center gap-4 text-red-600">
+                  <AlertTriangle size={24} />
+                  <h3 className="font-black uppercase text-sm italic">Zona de Peligro</h3>
+                </div>
+                <p className="text-xs font-bold text-slate-500 leading-relaxed">
+                  Utiliza esta función para borrar definitivamente todos los pedidos de la base de datos. 
+                  Ideal para limpiezas de fin de mes o para entregar el sistema listo para su uso desde cero.
+                </p>
+                <button 
+                  onClick={handleResetDatabase}
+                  disabled={isSaving}
+                  className="w-full bg-red-600 text-white py-6 rounded-[28px] font-black uppercase text-xs flex items-center justify-center gap-4 shadow-xl active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 className="animate-spin" size={20}/> : <Trash2 size={20}/>}
+                  VACIAR TODA LA BASE DE DATOS
+                </button>
+             </div>
+          </div>
+        )}
+
+        {!isLoading && view !== 'DASHBOARD' && view !== 'MAINTENANCE' && (
           <div className="space-y-4 animate-in slide-in-from-bottom duration-400">
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
