@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  X, MapPin, Plus, UserPlus, ChevronDown, Package, Trash, Save, Check, MessageCircle, Trash2, Hash 
+  X, MapPin, Plus, UserPlus, Package, Trash, Save, Check, MessageCircle, Hash, Activity 
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -40,12 +40,15 @@ export default function OrderDetailsModal({
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
 
-  // Lógica para asignar automáticamente al responsable si está vacío
+  // EFECTO DE AUTO-ASIGNACIÓN: Si no hay responsable, asigna al usuario logueado automáticamente
   useEffect(() => {
     if (!order.reviewer && currentUserName) {
-      onUpdate({ ...order, reviewer: currentUserName.toUpperCase() });
+      const autoAssign = async () => {
+        await onUpdate({ ...order, reviewer: currentUserName.toUpperCase() });
+      };
+      autoAssign();
     }
-  }, []);
+  }, [order.id]); // Solo se ejecuta al cambiar de pedido
 
   const totalConfirmedQuantity = useMemo(() => {
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
@@ -93,47 +96,63 @@ export default function OrderDetailsModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[700] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-md rounded-[48px] p-10 shadow-2xl relative overflow-y-auto max-h-[95vh] no-scrollbar">
-        <button onClick={onClose} className="absolute top-8 right-8 text-slate-300 hover:text-red-500 transition-colors z-[850]"><X/></button>
+    <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-md z-[700] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-md rounded-[48px] p-8 shadow-2xl relative overflow-y-auto max-h-[95vh] no-scrollbar border border-white/20">
+        
+        {/* Botón Cerrar */}
+        <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-slate-50 text-slate-300 hover:text-red-500 rounded-full transition-all z-[850]">
+          <X size={24}/>
+        </button>
 
         <div className="space-y-6">
-          <div className="flex justify-between items-center relative">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-black text-slate-500 uppercase">ORDEN {order.orderNumber || '---'}</span>
-              <button onClick={() => setIsAddingOrderNum(!isAddingOrderNum)} className="p-1.5 bg-slate-50 rounded-lg border border-slate-100 hover:bg-slate-100 transition-all"><Plus size={12}/></button>
+          {/* Header Superior: N° Orden y Responsables */}
+          <div className="flex justify-between items-start">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ORDEN {order.orderNumber || '---'}</span>
+                <button onClick={() => setIsAddingOrderNum(!isAddingOrderNum)} className="w-5 h-5 bg-slate-50 text-slate-400 rounded-md border border-slate-100 flex items-center justify-center hover:bg-indigo-50 hover:text-indigo-600 transition-all">
+                  <Plus size={12}/>
+                </button>
+              </div>
               {isAddingOrderNum && (
-                <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-slate-200 shadow-2xl rounded-2xl p-4 z-[900] animate-in zoom-in duration-200">
-                  <h4 className="text-[9px] font-black text-slate-400 uppercase mb-3 italic">Vincular Pedidos</h4>
+                <div className="absolute left-8 mt-6 w-60 bg-white border border-slate-100 shadow-2xl rounded-2xl p-4 z-[900] animate-in zoom-in">
+                  <h4 className="text-[8px] font-black text-slate-400 uppercase mb-2">Vincular</h4>
                   {siblingOrders.length > 0 ? siblingOrders.map(o => (
-                    <button key={o.id} onClick={() => handleLinkOrderNumber(o)} className="w-full text-left p-3 rounded-xl hover:bg-indigo-50 text-[10px] font-bold border border-transparent hover:border-indigo-100 mb-1">#{o.orderNumber} - {o.locality}</button>
-                  )) : <p className="text-[8px] text-slate-300 text-center uppercase italic py-2">Sin pedidos pendientes</p>}
+                    <button key={o.id} onClick={() => handleLinkOrderNumber(o)} className="w-full text-left p-2 rounded-lg hover:bg-slate-50 text-[10px] font-bold mb-1">#{o.orderNumber} - {o.locality}</button>
+                  )) : <p className="text-[8px] text-slate-300 text-center italic">Sin otros pendientes</p>}
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-1.5 relative">
-              <div className="bg-indigo-600 px-3 py-1.5 rounded-xl text-[9px] font-black text-white uppercase tracking-tight shadow-md">
-                {order.reviewer || 'SIN RESPONSABLE'}
+
+            <div className="flex flex-col items-end gap-1 relative">
+              <div className="flex items-center gap-2">
+                <div className="bg-slate-900 text-white px-3 py-1.5 rounded-xl text-[9px] font-black uppercase shadow-lg flex items-center gap-2">
+                  <Activity size={10} className="text-orange-500 animate-pulse"/>
+                  {order.reviewer || 'ASIGNANDO...'}
+                </div>
+                <button 
+                  onClick={() => setIsAddingCollaborator(!isAddingCollaborator)}
+                  className="w-7 h-7 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-md active:scale-90 transition-all"
+                >
+                  <Plus size={16}/>
+                </button>
               </div>
-              <button 
-                onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} 
-                className="p-1.5 bg-indigo-50 rounded-lg text-indigo-500 border border-indigo-100 hover:bg-indigo-100 transition-all shadow-sm"
-              >
-                <UserPlus size={14}/>
-              </button>
               
+              {/* Dropdown Colaboradores */}
               {isAddingCollaborator && (
-                <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-200 shadow-2xl rounded-2xl p-5 z-[950] animate-in zoom-in duration-200">
-                  <h4 className="text-[9px] font-black text-slate-400 uppercase mb-3 italic">Añadir Colaborador</h4>
+                <div className="absolute top-full right-0 mt-2 w-64 bg-white border border-slate-100 shadow-2xl rounded-3xl p-5 z-[1000] animate-in zoom-in">
+                  <h4 className="text-[9px] font-black text-slate-400 uppercase mb-3 flex items-center gap-2 italic">
+                    <UserPlus size={12}/> Sumar Colaborador
+                  </h4>
                   <div className="flex gap-2">
                     <input 
-                      className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none shadow-inner border border-transparent focus:border-indigo-200" 
+                      className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none border border-transparent focus:border-indigo-200" 
                       placeholder="NOMBRE..." 
                       value={newCollab} 
                       onChange={e => setNewCollab(e.target.value)} 
                     />
-                    <button onClick={handleAddCollaborator} className="bg-indigo-600 text-white p-3 rounded-xl shadow-lg active:scale-90 transition-all">
-                      <Check size={14}/>
+                    <button onClick={handleAddCollaborator} className="bg-indigo-600 text-white p-3 rounded-xl shadow-lg">
+                      <Check size={16}/>
                     </button>
                   </div>
                 </div>
@@ -141,21 +160,23 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          <div className="text-center pt-2">
-            <h2 className="text-4xl font-black italic uppercase leading-none tracking-tighter text-slate-900">{order.customerName}</h2>
-            <div className="flex items-center justify-center gap-3 mt-3">
-              <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-400 uppercase italic">
-                <Hash size={14} className="opacity-50" />
+          {/* Nombre Cliente y Datos Secundarios (Layout Corregido) */}
+          <div className="text-center bg-slate-50/50 py-6 rounded-[32px] border border-slate-100/50">
+            <h2 className="text-4xl font-black italic uppercase leading-none tracking-tighter text-slate-900 mb-2">{order.customerName}</h2>
+            <div className="flex items-center justify-center gap-4">
+              <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-400 uppercase tracking-tight">
+                <Hash size={14} className="text-slate-300" />
                 <span>N° CTA: {order.customerNumber || 'S/N'}</span>
               </div>
-              <span className="text-slate-200 font-light">|</span>
-              <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-600 uppercase italic">
-                <MapPin size={14}/>
+              <div className="h-4 w-px bg-slate-200" />
+              <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-600 uppercase tracking-tight">
+                <MapPin size={14} className="text-indigo-400" />
                 <span>{order.locality}</span>
               </div>
             </div>
           </div>
 
+          {/* Formulario de Carga */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1"><label className="text-[8px] font-black text-slate-400 uppercase ml-1">DEPÓSITO</label>
               <select className="w-full bg-slate-50 py-3.5 px-3 rounded-xl border border-slate-100 text-[10px] font-black uppercase shadow-inner" value={warehouseSelection} onChange={e => setWarehouseSelection(e.target.value)}>{warehouses.map(w => <option key={w}>{w}</option>)}</select>
@@ -195,6 +216,7 @@ export default function OrderDetailsModal({
             </div>
           )}
 
+          {/* Datos de Despacho */}
           <div className="bg-slate-900 p-6 rounded-[32px] text-white space-y-4 shadow-xl">
              <h3 className="text-[10px] font-black uppercase italic tracking-[0.2em] opacity-60">Datos de Despacho</h3>
              <select className="w-full bg-white/5 border border-white/10 rounded-xl py-3.5 px-3 text-[10px] font-black uppercase outline-none" value={dispatchTypeSelection} onChange={e => setDispatchTypeSelection(e.target.value)}>
@@ -208,6 +230,7 @@ export default function OrderDetailsModal({
              )}
           </div>
 
+          {/* Botones de Acción */}
           <div className="grid grid-cols-2 gap-3">
             <button onClick={saveDetails} disabled={isSaving} className="bg-indigo-600 text-white py-5 rounded-[22px] font-black uppercase text-[10px] flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
               <Save size={16}/> GUARDAR CAMBIOS
@@ -224,8 +247,14 @@ export default function OrderDetailsModal({
               </button>
             )}
           </div>
-          <button onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido: ' + order.customerName + ' está ' + order.status)}`)} className="w-full bg-emerald-500 text-white py-4 rounded-[20px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg active:scale-95 transition-all"><MessageCircle size={18}/> NOTIFICAR WHATSAPP</button>
-          <button onClick={() => onDelete(order.id)} className="w-full text-red-500 py-4 font-black uppercase text-[10px] border-2 border-red-50 rounded-[20px] hover:bg-red-50 transition-colors">ELIMINAR REGISTRO</button>
+          
+          <button onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido: ' + order.customerName + ' está ' + order.status)}`)} className="w-full bg-emerald-500 text-white py-4 rounded-[20px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg active:scale-95 transition-all">
+            <MessageCircle size={18}/> NOTIFICAR WHATSAPP
+          </button>
+          
+          <button onClick={() => onDelete(order.id)} className="w-full text-red-500 py-4 font-black uppercase text-[10px] border-2 border-red-50 rounded-[20px] hover:bg-red-50 transition-colors">
+            ELIMINAR REGISTRO
+          </button>
         </div>
       </div>
     </div>
