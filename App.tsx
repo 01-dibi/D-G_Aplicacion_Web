@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
-  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus, Settings, AlertTriangle, Trash2
+  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus, Settings, AlertTriangle, Trash2, Layers, ChevronRight
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types.ts';
 import { supabase, connectionStatus } from './supabaseClient.ts';
@@ -19,6 +19,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isStageSelectorOpen, setIsStageSelectorOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
@@ -197,28 +198,18 @@ export default function App() {
   const handleResetDatabase = async () => {
     const firstConfirm = confirm("⚠️ ATENCIÓN: ¿Estás seguro de que deseas borrar TODOS los pedidos de la base de datos? Esta acción es irreversible.");
     if (!firstConfirm) return;
-
     const secondConfirm = confirm("🛑 ÚLTIMO AVISO: Se eliminarán Pendientes, Preparados, Despachados e Historial. ¿Confirmar limpieza total?");
     if (!secondConfirm) return;
 
     setIsSaving(true);
     try {
-      // Usamos un filtro universal que funciona tanto para IDs de tipo Entero como UUID.
-      // '.not('id', 'is', null)' es la forma más segura de borrar todos los registros 
-      // cuando el cliente de Supabase requiere un filtro (por RLS o configuración).
-      const { error } = await supabase
-        .from('orders')
-        .delete()
-        .filter('id', 'not.is', null);
-
+      const { error } = await supabase.from('orders').delete().filter('id', 'not.is', null);
       if (error) throw error;
-      
-      alert("✅ Base de datos reseteada con éxito. La aplicación está lista para entregar con cero registros.");
+      alert("✅ Base de datos reseteada con éxito.");
       setView('DASHBOARD');
       fetchOrders();
     } catch (err: any) {
-      console.error("Error al resetear base de datos:", err);
-      alert(`Error al limpiar la base de datos: ${err.message || 'Error desconocido'}. Verifique que las políticas de DELETE estén habilitadas en Supabase.`);
+      alert(`Error: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
@@ -291,25 +282,11 @@ export default function App() {
                   <Settings size={40} className="animate-pulse" />
                 </div>
                 <h2 className="text-2xl font-black italic uppercase text-slate-900">Mantenimiento</h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Herramientas del Sistema</p>
              </div>
-
              <div className="bg-white border-2 border-red-50 p-8 rounded-[40px] shadow-sm space-y-6">
-                <div className="flex items-center gap-4 text-red-600">
-                  <AlertTriangle size={24} />
-                  <h3 className="font-black uppercase text-sm italic">Zona de Peligro</h3>
-                </div>
-                <p className="text-xs font-bold text-slate-500 leading-relaxed">
-                  Utiliza esta función para borrar definitivamente todos los pedidos de la base de datos. 
-                  Ideal para limpiezas de fin de mes o para entregar el sistema listo para su uso desde cero.
-                </p>
-                <button 
-                  onClick={handleResetDatabase}
-                  disabled={isSaving}
-                  className="w-full bg-red-600 text-white py-6 rounded-[28px] font-black uppercase text-xs flex items-center justify-center gap-4 shadow-xl active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {isSaving ? <Loader2 className="animate-spin" size={20}/> : <Trash2 size={20}/>}
-                  VACIAR TODA LA BASE DE DATOS
+                <div className="flex items-center gap-4 text-red-600"><AlertTriangle size={24} /><h3 className="font-black uppercase text-sm italic">Zona de Peligro</h3></div>
+                <button onClick={handleResetDatabase} disabled={isSaving} className="w-full bg-red-600 text-white py-6 rounded-[28px] font-black uppercase text-xs flex items-center justify-center gap-4 shadow-xl active:scale-95 transition-all">
+                  {isSaving ? <Loader2 className="animate-spin" size={20}/> : <Trash2 size={20}/>} VACIAR TODA LA BASE DE DATOS
                 </button>
              </div>
           </div>
@@ -329,6 +306,36 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Stage Selector Modal */}
+      {isStageSelectorOpen && (
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[1000] flex items-center justify-center p-6" onClick={() => setIsStageSelectorOpen(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[50px] p-8 shadow-2xl space-y-6 animate-in zoom-in duration-300" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-2">
+              <h3 className="text-xl font-black italic uppercase text-slate-900 tracking-tighter">Acceso a Etapas</h3>
+              <p className="text-[8px] font-black uppercase text-slate-400 tracking-[0.3em]">Selecciona una sección</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+               {[
+                 { v: 'PENDING', l: 'Pendientes', c: 'bg-orange-500', i: <ClipboardList /> },
+                 { v: 'COMPLETED', l: 'Preparados', c: 'bg-emerald-600', i: <CheckCircle2 /> },
+                 { v: 'DISPATCHED', l: 'Despachados', c: 'bg-indigo-600', i: <Truck /> },
+                 { v: 'ALL', l: 'Historial', c: 'bg-slate-700', i: <History /> }
+               ].map(item => (
+                 <button 
+                   key={item.v} 
+                   onClick={() => { setView(item.v as View); setIsStageSelectorOpen(false); }}
+                   className={`${item.c} text-white p-6 rounded-[35px] flex flex-col items-center justify-center gap-3 shadow-lg active:scale-95 transition-all`}
+                 >
+                   {React.cloneElement(item.i as React.ReactElement, { size: 28 })}
+                   <span className="text-[10px] font-black uppercase tracking-widest">{item.l}</span>
+                 </button>
+               ))}
+            </div>
+            <button onClick={() => setIsStageSelectorOpen(false)} className="w-full py-4 text-slate-400 font-black text-[10px] uppercase tracking-[0.5em] border-t pt-6">Cerrar</button>
+          </div>
+        </div>
+      )}
 
       {isNewOrderModalOpen && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[600] flex items-center justify-center p-5">
@@ -351,23 +358,31 @@ export default function App() {
         />
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t pt-3 pb-6 px-1 flex justify-between items-end max-w-md mx-auto rounded-t-[32px] shadow-[0_-10px_25px_-5px_rgba(0,0,0,0.05)] z-40">
+      {/* Redesigned Bottom Navigation with 3 items */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t pt-4 pb-8 px-8 flex justify-between items-center max-w-md mx-auto rounded-t-[40px] shadow-[0_-15px_40px_-5px_rgba(0,0,0,0.1)] z-[500]">
         <NavBtn label="Inicio" icon={<LayoutDashboard />} active={view === 'DASHBOARD'} onClick={() => setView('DASHBOARD')} />
-        <NavBtn label="Pend." icon={<ClipboardList />} active={view === 'PENDING'} onClick={() => setView('PENDING')} />
-        <NavBtn label="Prep." icon={<CheckCircle2 />} active={view === 'COMPLETED'} onClick={() => setView('COMPLETED')} />
         
-        <div className="flex flex-col items-center gap-1.5 flex-1 mb-1">
-          <div 
-            className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition-all border-4 border-white -mt-4" 
+        {/* Center Button: New Order (+) */}
+        <div className="flex-1 flex justify-center">
+          <button 
             onClick={() => setIsNewOrderModalOpen(true)}
+            className="w-16 h-16 bg-slate-900 text-white rounded-[24px] flex flex-col items-center justify-center shadow-2xl active:scale-90 transition-all border-4 border-white"
           >
-            <Plus size={24} />
-          </div>
-          <span className="text-[8px] font-black uppercase tracking-tighter text-slate-400">Nueva</span>
+            <Plus size={24} strokeWidth={3} />
+            <span className="text-[7px] font-black uppercase tracking-tighter mt-1">Cargar</span>
+          </button>
         </div>
 
-        <NavBtn label="Desp." icon={<Truck />} active={view === 'DISPATCHED'} onClick={() => setView('DISPATCHED')} />
-        <NavBtn label="Hist." icon={<History />} active={view === 'ALL'} onClick={() => setView('ALL')} />
+        {/* Right Button: Stage Selector */}
+        <button 
+          onClick={() => setIsStageSelectorOpen(true)}
+          className="flex flex-col items-center justify-center gap-1.5 transition-all flex-1 py-1 text-slate-400"
+        >
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl shadow-inner animate-pulse">
+            <Layers size={22} />
+          </div>
+          <span className="text-[8px] font-black uppercase tracking-tighter text-slate-400 opacity-60">Etapas</span>
+        </button>
       </nav>
     </div>
   );
