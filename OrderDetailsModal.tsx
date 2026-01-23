@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { 
-  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon, AlertTriangle, Eraser
+  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -26,7 +26,6 @@ export default function OrderDetailsModal({
   const [isLinkingOrder, setIsLinkingOrder] = useState(false);
   const [linkOrderInput, setLinkOrderInput] = useState('');
   const [linkedOrders, setLinkedOrders] = useState<Order[]>([order]);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Configuración de opciones
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
@@ -130,69 +129,10 @@ export default function OrderDetailsModal({
     }
   };
 
-  // Función para limpieza parcial (Borrado parcial de datos de etapa)
-  const handlePartialDelete = async () => {
-    setIsAddingCollaborator(false);
-    const clearedOrder: Order = {
-      ...order,
-      detailedPackaging: [],
-      packageQuantity: 0,
-      reviewer: '',
-      warehouse: '',
-      packageType: '',
-      dispatchType: '',
-      dispatchValue: '',
-      carrier: ''
-    };
-    const success = await onUpdate(clearedOrder);
-    if (success) {
-      setConfirmedEntries([]);
-      setCurrentQty(0);
-      setShowDeleteConfirm(false);
-      alert("Datos de la etapa limpiados correctamente.");
-    }
-  };
-
   return (
     <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[700] flex items-center justify-center p-4">
       <div className="bg-white w-full max-md rounded-[50px] p-8 shadow-2xl relative overflow-y-auto max-h-[95vh] no-scrollbar border border-white/20">
         
-        {/* Overlay de Confirmación de Eliminación */}
-        {showDeleteConfirm && (
-          <div className="absolute inset-0 bg-white/95 backdrop-blur-md z-[1000] flex flex-col items-center justify-center p-10 text-center animate-in fade-in duration-300">
-            <div className="bg-red-50 p-6 rounded-full mb-6">
-              <AlertTriangle size={48} className="text-red-500" />
-            </div>
-            <h3 className="text-2xl font-black italic uppercase text-slate-900 mb-2">Confirmar Eliminación</h3>
-            <p className="text-sm font-medium text-slate-500 mb-10 leading-relaxed">
-              ¿Cómo deseas proceder con este pedido? Puedes borrarlo permanentemente o solo limpiar los datos de esta etapa.
-            </p>
-            
-            <div className="w-full space-y-3">
-              <button 
-                onClick={() => onDelete(order.id)}
-                className="w-full bg-red-500 text-white py-5 rounded-[24px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all border-b-4 border-red-700"
-              >
-                <Trash size={18} strokeWidth={3}/> ELIMINACIÓN TOTAL
-              </button>
-              
-              <button 
-                onClick={handlePartialDelete}
-                className="w-full bg-orange-100 text-orange-600 py-5 rounded-[24px] font-black uppercase text-xs flex items-center justify-center gap-3 active:scale-95 transition-all border-b-4 border-orange-200"
-              >
-                <Eraser size={18} strokeWidth={3}/> LIMPIAR DATOS ETAPA
-              </button>
-              
-              <button 
-                onClick={() => setShowDeleteConfirm(false)}
-                className="w-full bg-slate-100 text-slate-500 py-4 rounded-[24px] font-black uppercase text-[10px] mt-4"
-              >
-                CANCELAR
-              </button>
-            </div>
-          </div>
-        )}
-
         <button onClick={onClose} className="absolute top-6 right-8 p-2.5 bg-slate-100 text-slate-400 hover:text-red-500 rounded-full transition-all z-[850] shadow-sm">
           <X size={24} strokeWidth={3}/>
         </button>
@@ -317,14 +257,6 @@ export default function OrderDetailsModal({
             )}
             <button onClick={() => window.open(`whatsapp://send?text=${encodeURIComponent('D&G Logística - Pedido de ' + order.customerName + ' avanzado a etapa: ' + order.status)}`)} className="w-full bg-emerald-500 text-white py-5 rounded-[32px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-lg hover:bg-emerald-600 transition-all active:scale-95 border-b-4 border-emerald-700"><MessageCircle size={22} className="fill-white"/> NOTIFICAR WHATSAPP</button>
             <button onClick={onClose} className="w-full bg-slate-900 text-white py-5 rounded-[32px] font-black uppercase text-[11px] shadow-sm active:scale-95 border-b-4 border-slate-700 transition-all">CERRAR PANTALLA</button>
-            {!isReadOnly && (
-              <button 
-                onClick={() => setShowDeleteConfirm(true)} 
-                className="w-full text-red-500 py-4 font-black uppercase text-[10px] border-2 border-red-50 rounded-2xl hover:bg-red-50 transition-colors mt-4"
-              >
-                ELIMINAR REGISTRO
-              </button>
-            )}
           </div>
         </div>
       </div>
