@@ -16,14 +16,16 @@ interface OrderDetailsModalProps {
 }
 
 export default function OrderDetailsModal({ 
-  order, allOrders, onClose, onUpdate, onDelete, isSaving 
+  order, onClose, onUpdate, onDelete, isSaving 
 }: OrderDetailsModalProps) {
-  // Estado de Solo Lectura: Si el pedido ya está FINALIZADO
+  // Estado de Solo Lectura si el pedido ya está FINALIZADO
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
   
+  // Estados para el sistema de colaboradores (+)
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
-  const [newCollab, setNewCollab] = useState('');
+  const [newCollabInput, setNewCollabInput] = useState('');
   
+  // Opciones de configuración
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
   const packageTypes = ["CAJA", "BOLSA:", "PAQUETE", "BOBINA", "OTROS:"];
   const dispatchMainTypes = ["VIAJANTES", "VENDEDORES", "TRANSPORTE", "RETIRO PERSONAL"];
@@ -32,7 +34,7 @@ export default function OrderDetailsModal({
     "VENDEDORES": ["MAURO", "GUSTAVO"]
   };
 
-  // Estados locales para los campos editables
+  // Estados locales para la edición
   const [warehouseSelection, setWarehouseSelection] = useState(order.warehouse ? (warehouses.includes(order.warehouse) ? order.warehouse : 'Otros:') : warehouses[0]);
   const [customWarehouseText, setCustomWarehouseText] = useState(!warehouses.includes(order.warehouse || '') ? (order.warehouse || '') : '');
   const [packageTypeSelection, setPackageTypeSelection] = useState(order.packageType ? (packageTypes.includes(order.packageType) ? order.packageType : 'OTROS:') : packageTypes[0]);
@@ -47,24 +49,19 @@ export default function OrderDetailsModal({
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
 
-  // --- LÓGICA DE CONFIRMACIÓN Y AVANCE DE ETAPA ---
+  // --- CORRECCIÓN: LÓGICA DE AVANCE DE ETAPA ---
   const handleConfirmStage = async () => {
-    if (isSaving) return;
+    if (isSaving || isReadOnly) return;
 
-    // Definir el siguiente estado de forma robusta
+    // Definición de flujo de estados
     let nextStatus: OrderStatus = order.status;
     if (order.status === OrderStatus.PENDING) nextStatus = OrderStatus.COMPLETED;
     else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
     else if (order.status === OrderStatus.DISPATCHED) nextStatus = OrderStatus.ARCHIVED;
 
-    // Si ya está finalizado, no hacemos nada
-    if (order.status === OrderStatus.ARCHIVED) return;
-
-    // Preparar valores de depósito y bulto (considerando los "Otros")
+    // Recolectar datos actuales del formulario
     const finalWarehouse = warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection;
     const finalPackageType = packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection;
-    
-    // Preparar valores de despacho
     const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
     const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
 
@@ -79,59 +76,66 @@ export default function OrderDetailsModal({
       dispatchValue: finalDispatchValue
     };
 
-    // Llamada a la función de actualización de App.tsx (Supabase)
+    // Actualizar en base de datos (Supabase)
     const success = await onUpdate(updatedOrder);
     
-    // Si se guardó correctamente, cerramos el modal para mostrar los cambios en la lista principal
+    // Si fue exitoso, cerramos para refrescar la lista
     if (success) {
       onClose();
     }
   };
 
-  // --- LÓGICA DE RESPONSABLES / COLABORADORES ---
+  // --- LÓGICA DE COLABORADORES MULTI-NOMBRE (+) ---
   const handleAddCollaborators = async () => {
-    if (isReadOnly || !newCollab.trim()) return;
+    const input = newCollabInput.trim();
+    if (!input) {
+      setIsAddingCollaborator(false);
+      return;
+    }
 
-    // Procesar la entrada: separar por comas si el usuario escribió varios
-    const namesToAdd = newCollab.split(',')
+    // Procesamos la entrada: separamos por comas y limpiamos
+    const newNames = input.split(',')
       .map(n => n.trim().toUpperCase())
       .filter(n => n !== "");
 
-    const currentNames = order.reviewer ? order.reviewer.split(',').map(n => n.trim()) : [];
+    // Nombres actuales
+    const existingNames = order.reviewer ? order.reviewer.split(',').map(n => n.trim()) : [];
     
-    // Unir nombres existentes con los nuevos evitando duplicados
-    const allNames = Array.from(new Set([...currentNames, ...namesToAdd])).filter(n => n !== "");
-    const updatedReviewer = allNames.join(', ');
+    // Unimos evitando duplicados
+    const combined = Array.from(new Set([...existingNames, ...newNames]));
+    const finalReviewerString = combined.join(', ');
 
-    // Actualizar inmediatamente en la base de datos para que sea visible
-    await onUpdate({ ...order, reviewer: updatedReviewer });
+    // Guardar cambio de responsable inmediatamente
+    const success = await onUpdate({ ...order, reviewer: finalReviewerString });
     
-    setNewCollab('');
-    setIsAddingCollaborator(false);
+    if (success) {
+      setNewCollabInput('');
+      setIsAddingCollaborator(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[700] flex items-center justify-center p-4">
       <div className="bg-white w-full max-md rounded-[50px] p-8 shadow-2xl relative overflow-y-auto max-h-[95vh] no-scrollbar border border-white/20">
         
-        {/* Botón Cerrar X */}
+        {/* X para cerrar */}
         <button onClick={onClose} className="absolute top-6 right-8 p-2.5 bg-slate-100 text-slate-400 hover:text-red-500 rounded-full transition-all z-[850] shadow-sm active:scale-90">
           <X size={24} strokeWidth={3}/>
         </button>
 
         <div className="pt-10 space-y-8">
           
-          {/* CABECERA: PEDIDO Y RESPONSABLES */}
+          {/* CABECERA: PEDIDO Y RESPONSABLES ASIGNADOS */}
           <div className="flex justify-between items-center px-2">
             <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm">
               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none">PEDIDO {order.orderNumber || '---'}</span>
             </div>
 
             <div className="flex items-center gap-2 relative">
-              {/* Lugar donde se colocan los responsables asignados */}
-              <div className="bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-3 border border-white/10 min-w-[120px] justify-center">
-                <Users size={14} className="text-orange-500" />
-                <span className="text-[10px] font-black uppercase tracking-tight truncate max-w-[140px]">
+              {/* Visualización de responsables (Sin celda de edición directa) */}
+              <div className="bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-white/10 min-w-[140px] max-w-[180px] justify-center overflow-hidden">
+                <Users size={14} className="text-orange-500 flex-shrink-0" />
+                <span className="text-[10px] font-black uppercase tracking-tight truncate">
                   {order.reviewer || 'SIN ASIGNAR'}
                 </span>
               </div>
@@ -140,20 +144,21 @@ export default function OrderDetailsModal({
                 <div className="relative">
                   <button 
                     onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} 
-                    className="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 border-2 border-white transition-all z-[900]"
+                    className="w-11 h-11 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 border-2 border-white transition-all z-[900] hover:bg-indigo-700"
                   >
                     <UserPlus size={20} strokeWidth={3}/>
                   </button>
 
+                  {/* Popover del botón (+) */}
                   {isAddingCollaborator && (
-                    <div className="absolute top-full right-0 mt-3 w-72 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.4)] rounded-[32px] p-6 z-[1000] animate-in zoom-in">
-                      <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Asignar Responsable(s)</p>
+                    <div className="absolute top-full right-0 mt-3 w-72 bg-white border border-slate-100 shadow-[0_25px_60px_rgba(0,0,0,0.5)] rounded-[32px] p-6 z-[1000] animate-in zoom-in">
+                      <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Agregar Responsable(s)</p>
                       <div className="flex gap-2">
                         <input 
                           className="flex-1 bg-slate-50 p-4 rounded-2xl text-xs font-black uppercase outline-none shadow-inner border border-transparent focus:border-indigo-100" 
-                          placeholder="NOMBRE O NOMBRES..." 
-                          value={newCollab} 
-                          onChange={e => setNewCollab(e.target.value)} 
+                          placeholder="NOMBRE(S)..." 
+                          value={newCollabInput} 
+                          onChange={e => setNewCollabInput(e.target.value)} 
                           autoFocus
                           onKeyDown={(e) => e.key === 'Enter' && handleAddCollaborators()}
                         />
@@ -161,7 +166,7 @@ export default function OrderDetailsModal({
                           <Check size={20} strokeWidth={4}/>
                         </button>
                       </div>
-                      <p className="text-[8px] text-slate-300 mt-3 uppercase font-bold">Puedes separar varios con comas</p>
+                      <p className="text-[8px] text-slate-300 mt-3 uppercase font-bold leading-tight">Usa comas para múltiples nombres</p>
                     </div>
                   )}
                 </div>
@@ -187,13 +192,13 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* FORMULARIO DE CARGA DE BULTOS */}
+          {/* FORMULARIO DE CARGA */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Depósito Origen</label>
               <select 
                 disabled={isReadOnly} 
-                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 disabled:bg-slate-50 transition-all" 
+                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 transition-all" 
                 value={warehouseSelection} 
                 onChange={e => setWarehouseSelection(e.target.value)}
               >
@@ -204,7 +209,7 @@ export default function OrderDetailsModal({
               <label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Formato Bulto</label>
               <select 
                 disabled={isReadOnly} 
-                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 disabled:bg-slate-50 transition-all" 
+                className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none border-2 border-transparent focus:border-indigo-100 disabled:opacity-50 transition-all" 
                 value={packageTypeSelection} 
                 onChange={e => setPackageTypeSelection(e.target.value)}
               >
@@ -244,19 +249,19 @@ export default function OrderDetailsModal({
             </button>
           )}
 
-          {/* LISTA DE BULTOS CONFIRMADOS */}
+          {/* LISTA DE CARGAS REALIZADAS */}
           {confirmedEntries.length > 0 && (
-            <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar p-1">
+            <div className="space-y-2 max-h-40 overflow-y-auto no-scrollbar p-1">
               {confirmedEntries.map(e => (
-                <div key={e.id} className="flex items-center justify-between bg-white border-2 border-slate-50 p-4 rounded-3xl shadow-sm hover:border-indigo-100 transition-all">
+                <div key={e.id} className="flex items-center justify-between bg-white border-2 border-slate-50 p-4 rounded-3xl shadow-sm">
                   <div>
                     <p className="text-[9px] font-black text-indigo-500 uppercase italic leading-none">{e.deposit}</p>
                     <p className="text-[11px] font-black text-slate-800 uppercase mt-1 tracking-tight">{e.type}</p>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black text-slate-900 border border-slate-200">{e.quantity}</span>
+                    <span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black text-slate-900">{e.quantity}</span>
                     {!isReadOnly && (
-                      <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2 active:scale-90 hover:text-red-600 transition-colors">
+                      <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2 active:scale-90">
                         <Trash size={20}/>
                       </button>
                     )}
