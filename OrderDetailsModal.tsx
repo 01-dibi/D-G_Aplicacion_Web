@@ -18,6 +18,7 @@ interface OrderDetailsModalProps {
 export default function OrderDetailsModal({ 
   order, allOrders, onClose, onUpdate, onDelete, isSaving, currentUserName 
 }: OrderDetailsModalProps) {
+  // El historial se considera cuando el estado es ARCHIVED ('FINALIZADO')
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
   
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
@@ -42,12 +43,12 @@ export default function OrderDetailsModal({
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
 
-  // --- AUTO-ASIGNACIÓN ---
+  // Auto-asignación de responsable si está vacío
   useEffect(() => {
     if (!isReadOnly && (!order.reviewer || order.reviewer.trim() === '') && currentUserName) {
       onUpdate({ ...order, reviewer: currentUserName.toUpperCase() });
     }
-  }, [order.id, currentUserName]);
+  }, [order.id, currentUserName, isReadOnly]);
 
   const totalConfirmedQuantity = useMemo(() => {
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
@@ -58,27 +59,40 @@ export default function OrderDetailsModal({
     return allOrders.filter(o => String(o.customerNumber) === String(order.customerNumber) && o.id !== order.id && o.status === OrderStatus.PENDING);
   }, [allOrders, order]);
 
-  // --- LÓGICA DE PROGRESIÓN DE ETAPA ---
+  // --- LÓGICA DE CONFIRMACIÓN Y AVANCE DE ETAPA ---
   const handleConfirmStage = async () => {
+    if (isSaving) return;
+
+    // 1. Calcular el siguiente estado
     let nextStatus = order.status;
     if (order.status === OrderStatus.PENDING) nextStatus = OrderStatus.COMPLETED;
     else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
     else if (order.status === OrderStatus.DISPATCHED) nextStatus = OrderStatus.ARCHIVED;
 
-    const val = (dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL') ? customDispatchText : dispatchValueSelection;
-    
-    await onUpdate({
+    // 2. Preparar los valores finales (incluyendo campos personalizados)
+    const finalWarehouse = warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection;
+    const finalPackageType = packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection;
+    const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
+    const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
+
+    // 3. Crear el objeto actualizado completo
+    const updatedOrder: Order = {
       ...order,
       status: nextStatus,
-      warehouse: warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection,
-      packageType: packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection,
+      warehouse: finalWarehouse,
+      packageType: finalPackageType,
       packageQuantity: totalConfirmedQuantity,
       detailedPackaging: confirmedEntries,
       dispatchType: dispatchTypeSelection,
-      dispatchValue: val
-    });
+      dispatchValue: finalDispatchValue,
+      reviewer: order.reviewer // Mantenemos el responsable actual/colaboradores
+    };
 
-    if (nextStatus === OrderStatus.ARCHIVED) {
+    // 4. Ejecutar actualización en DB
+    const success = await onUpdate(updatedOrder);
+
+    // 5. Si la actualización fue exitosa, cerramos el modal para reflejar el cambio de vista
+    if (success) {
       onClose();
     }
   };
@@ -89,7 +103,8 @@ export default function OrderDetailsModal({
     if (!name) return;
     const current = order.reviewer ? order.reviewer.split(',').map(s => s.trim()).filter(s => s !== '') : [];
     if (!current.includes(name)) {
-      await onUpdate({...order, reviewer: [...current, name].join(', ')});
+      const updatedReviewer = [...current, name].join(', ');
+      await onUpdate({...order, reviewer: updatedReviewer});
     }
     setNewCollab('');
     setIsAddingCollaborator(false);
@@ -106,7 +121,7 @@ export default function OrderDetailsModal({
 
         <div className="pt-10 space-y-8">
           
-          {/* SECCIÓN SUPERIOR: PEDIDO Y RESPONSABLE (BAJADOS) */}
+          {/* SECCIÓN SUPERIOR: PEDIDO Y RESPONSABLE */}
           <div className="flex justify-between items-center px-2">
             <div className="flex items-center gap-2 relative">
               <div className="bg-slate-50 border border-slate-100 px-4 py-2.5 rounded-2xl shadow-sm">
@@ -117,20 +132,12 @@ export default function OrderDetailsModal({
                   <Plus size={20} strokeWidth={4}/>
                 </button>
               )}
-              {isAddingOrderNum && (
-                <div className="absolute top-full left-0 mt-3 w-64 bg-white border border-slate-100 shadow-2xl rounded-3xl p-5 z-[1000] animate-in zoom-in">
-                  <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 italic">Vincular Pendientes</h4>
-                  {siblingOrders.length > 0 ? siblingOrders.map(o => (
-                    <button key={o.id} onClick={() => {}} className="w-full text-left p-3 rounded-xl hover:bg-indigo-50 text-[11px] font-bold mb-1">#{o.orderNumber}</button>
-                  )) : <p className="text-[9px] text-slate-300 text-center py-2 font-black uppercase">Sin pendientes</p>}
-                </div>
-              )}
             </div>
 
             <div className="flex items-center gap-2 relative">
               <div className="bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-xl flex items-center gap-3 border border-white/10">
                 <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
-                <span className="text-[10px] font-black uppercase tracking-tight">{order.reviewer || 'CARGANDO...'}</span>
+                <span className="text-[10px] font-black uppercase tracking-tight">{order.reviewer || 'ASIGNANDO...'}</span>
               </div>
               {!isReadOnly && (
                 <button onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} className="w-10 h-10 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 border-2 border-white transition-all">
@@ -148,7 +155,7 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* CUERPO CENTRAL: NOMBRE CLIENTE */}
+          {/* CUERPO CENTRAL: CLIENTE */}
           <div className="text-center bg-slate-50/70 py-10 rounded-[45px] border border-slate-200/50 shadow-inner">
             <h2 className="text-4xl font-black italic uppercase leading-none tracking-tighter text-slate-900 mb-4 px-6">{order.customerName}</h2>
             <div className="flex items-center justify-center gap-6">
@@ -164,20 +171,32 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* FORMULARIO Y CARGA (DESHABILITADO EN HISTORIAL) */}
+          {/* SELECTORES DE CARGA (BLOQUEADOS EN HISTORIAL) */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5"><label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Depósito</label>
-              <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none disabled:opacity-50" value={warehouseSelection} onChange={e => setWarehouseSelection(e.target.value)}>{warehouses.map(w => <option key={w}>{w}</option>)}</select>
+            <div className="space-y-1.5"><label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Depósito Origen</label>
+              <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none disabled:bg-slate-50 disabled:text-slate-400 transition-all border-2 border-transparent focus:border-indigo-100" value={warehouseSelection} onChange={e => setWarehouseSelection(e.target.value)}>
+                {warehouses.map(w => <option key={w}>{w}</option>)}
+              </select>
             </div>
-            <div className="space-y-1.5"><label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Bulto</label>
-              <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none disabled:opacity-50" value={packageTypeSelection} onChange={e => setPackageTypeSelection(e.target.value)}>{packageTypes.map(t => <option key={t}>{t}</option>)}</select>
+            <div className="space-y-1.5"><label className="text-[9px] font-black text-slate-400 uppercase ml-3 italic">Formato Bulto</label>
+              <select disabled={isReadOnly} className="w-full bg-slate-100 py-4 px-4 rounded-2xl text-[11px] font-black uppercase shadow-inner outline-none disabled:bg-slate-50 disabled:text-slate-400 transition-all border-2 border-transparent focus:border-indigo-100" value={packageTypeSelection} onChange={e => setPackageTypeSelection(e.target.value)}>
+                {packageTypes.map(t => <option key={t}>{t}</option>)}
+              </select>
             </div>
           </div>
 
+          {/* ENTRADA DE CANTIDAD (BLOQUEADA EN HISTORIAL) */}
           <div className="grid grid-cols-2 gap-5">
-            <div className="bg-indigo-50/70 p-7 rounded-[35px] border-2 border-indigo-100 text-center">
-              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Cant. Bultos</span>
-              <input disabled={isReadOnly} type="number" className="w-full bg-transparent text-4xl font-black text-indigo-700 outline-none text-center mt-1 disabled:opacity-30" value={currentQty || ''} placeholder="0" onChange={e => setCurrentQty(parseInt(e.target.value) || 0)} />
+            <div className="bg-indigo-50/70 p-7 rounded-[35px] border-2 border-indigo-100 text-center relative">
+              <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Añadir Cant.</span>
+              <input 
+                disabled={isReadOnly} 
+                type="number" 
+                className="w-full bg-transparent text-4xl font-black text-indigo-700 outline-none text-center mt-1 disabled:opacity-30" 
+                value={currentQty || ''} 
+                placeholder="0" 
+                onChange={e => setCurrentQty(parseInt(e.target.value) || 0)} 
+              />
             </div>
             <div className="bg-orange-50/70 p-7 rounded-[35px] border-2 border-orange-100 text-center">
               <span className="text-[10px] font-black text-orange-400 uppercase tracking-widest">Total Acum.</span>
@@ -186,30 +205,34 @@ export default function OrderDetailsModal({
           </div>
 
           {!isReadOnly && (
-            <button onClick={() => {
-              if (currentQty <= 0) return;
-              setConfirmedEntries([...confirmedEntries, { id: Date.now().toString(), deposit: warehouseSelection, type: packageTypeSelection, quantity: currentQty }]);
-              setCurrentQty(0);
-            }} className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95">
+            <button 
+              onClick={() => {
+                if (currentQty <= 0) return;
+                setConfirmedEntries([...confirmedEntries, { id: Date.now().toString(), deposit: warehouseSelection, type: packageTypeSelection, quantity: currentQty }]);
+                setCurrentQty(0);
+              }} 
+              className="w-full bg-slate-900 text-white py-6 rounded-3xl font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all"
+            >
               <Plus size={22} strokeWidth={4}/> CONFIRMAR CARGA
             </button>
           )}
 
+          {/* LISTA DE CARGAS REALIZADAS */}
           {confirmedEntries.length > 0 && (
             <div className="space-y-2 max-h-48 overflow-y-auto no-scrollbar p-1">
               {confirmedEntries.map(e => (
                 <div key={e.id} className="flex items-center justify-between bg-white border-2 border-slate-50 p-4 rounded-3xl shadow-sm">
-                  <div><p className="text-[9px] font-black text-indigo-500 uppercase italic">{e.deposit}</p><p className="text-[11px] font-black text-slate-800 uppercase">{e.type}</p></div>
+                  <div><p className="text-[9px] font-black text-indigo-500 uppercase italic">{e.deposit}</p><p className="text-[11px] font-black text-slate-800 uppercase tracking-tight">{e.type}</p></div>
                   <div className="flex items-center gap-4">
-                    <span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black">{e.quantity}</span>
-                    {!isReadOnly && <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2"><Trash size={20}/></button>}
+                    <span className="bg-slate-100 px-4 py-2 rounded-xl text-sm font-black text-slate-900">{e.quantity}</span>
+                    {!isReadOnly && <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-2 active:scale-90"><Trash size={20}/></button>}
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Datos de Despacho */}
+          {/* DATOS DE DESPACHO */}
           <div className="bg-indigo-600 p-8 rounded-[40px] text-white space-y-4 shadow-2xl relative overflow-hidden">
              <div className="absolute top-0 right-0 opacity-10 rotate-12 -mr-6 -mt-6"><Package size={120}/></div>
              <h3 className="text-[11px] font-black uppercase italic tracking-[0.2em] opacity-80 flex items-center gap-3"><Activity size={16}/> Datos de Despacho</h3>
@@ -224,20 +247,20 @@ export default function OrderDetailsModal({
              )}
           </div>
 
-          {/* BOTONERA DINÁMICA */}
+          {/* BOTONERA PRINCIPAL VINCULADA */}
           <div className="space-y-4">
             {!isReadOnly ? (
               <button 
                 onClick={handleConfirmStage} 
                 disabled={isSaving} 
-                className="w-full bg-indigo-600 text-white py-6 rounded-[32px] font-black uppercase text-xs flex items-center justify-center gap-4 shadow-[0_20px_40px_-10px_rgba(79,70,229,0.5)] active:scale-95 transition-all border-b-4 border-indigo-800"
+                className="w-full bg-indigo-600 text-white py-6 rounded-[32px] font-black uppercase text-xs flex items-center justify-center gap-4 shadow-[0_20px_40px_-10px_rgba(79,70,229,0.5)] active:scale-95 transition-all border-b-4 border-indigo-800 disabled:opacity-50"
               >
                 {isSaving ? <Activity className="animate-spin" size={22}/> : <Check size={22} strokeWidth={4}/>}
                 CONFIRMACIÓN DE ETAPA
               </button>
             ) : (
-              <div className="bg-slate-100 p-4 rounded-[32px] text-center border-2 border-slate-200">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pedido en Historial (Solo Lectura)</p>
+              <div className="bg-slate-50 p-6 rounded-[32px] text-center border-2 border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">PEDIDO EN HISTORIAL (SOLO LECTURA)</p>
               </div>
             )}
             
@@ -245,7 +268,7 @@ export default function OrderDetailsModal({
               <MessageCircle size={22} className="fill-white"/> NOTIFICAR WHATSAPP
             </button>
             
-            <button onClick={onClose} className="w-full bg-slate-900 text-white py-5 rounded-[32px] font-black uppercase text-[11px] shadow-sm active:scale-95 border-b-4 border-slate-700">
+            <button onClick={onClose} className="w-full bg-slate-900 text-white py-5 rounded-[32px] font-black uppercase text-[11px] shadow-sm active:scale-95 border-b-4 border-slate-700 transition-all">
               CERRAR PANTALLA
             </button>
 
