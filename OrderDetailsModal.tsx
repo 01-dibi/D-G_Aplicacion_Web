@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { 
-  X, MapPin, Plus, UserPlus, ChevronDown, Package, Trash, Save, Check, MessageCircle, Trash2 
+  X, MapPin, Plus, UserPlus, ChevronDown, Package, Trash, Save, Check, MessageCircle, Trash2, Hash 
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -120,7 +120,17 @@ export default function OrderDetailsModal({
 
           <div className="text-center">
             <h2 className="text-4xl font-black italic uppercase leading-none tracking-tighter text-slate-900">{order.customerName}</h2>
-            <p className="text-[11px] font-black text-indigo-600 uppercase mt-2 italic flex items-center justify-center gap-2"><MapPin size={14}/> {order.locality}</p>
+            <div className="flex items-center justify-center gap-3 mt-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-400 uppercase italic">
+                <Hash size={14} className="opacity-50" />
+                <span>N° CTA: {order.customerNumber || 'S/N'}</span>
+              </div>
+              <span className="text-slate-200">|</span>
+              <div className="flex items-center gap-1.5 text-[11px] font-black text-indigo-600 uppercase italic">
+                <MapPin size={14}/>
+                <span>{order.locality}</span>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -198,4 +208,3 @@ export default function OrderDetailsModal({
     </div>
   );
 }
-    

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Package, Truck, Sparkles } from 'lucide-react';
+import { Package, Truck, Sparkles, Hash } from 'lucide-react';
 import { OrderStatus } from './types.ts';
 
 export function StatCard({ count, label, color, icon, onClick }: any) {
@@ -34,7 +34,15 @@ export function OrderCard({ order, onClick }: any) {
     <div onClick={onClick} className="bg-white p-6 rounded-[32px] border-2 border-slate-100 shadow-sm relative overflow-hidden active:scale-95 transition-all">
       {order.source === 'IA' && <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[7px] font-black px-3 py-1.5 rounded-bl-2xl uppercase tracking-[0.2em] flex items-center gap-1.5"><Sparkles size={10}/> IA</div>}
       <div className="flex justify-between items-start mb-3">
-        <div><span className="text-[9px] font-black text-slate-300 uppercase">#{order.orderNumber}</span><span className="text-[10px] font-black text-indigo-600 block italic">{order.locality}</span></div>
+        <div>
+          <div className="flex items-center gap-2 mb-0.5">
+            <span className="text-[9px] font-black text-slate-300 uppercase leading-none">#{order.orderNumber}</span>
+            <span className="text-[9px] font-black text-slate-400 uppercase leading-none flex items-center gap-0.5">
+               <Hash size={8} /> {order.customerNumber || '---'}
+            </span>
+          </div>
+          <span className="text-[10px] font-black text-indigo-600 block italic">{order.locality}</span>
+        </div>
         <span className={`text-[8px] font-black px-3 py-1.5 rounded-xl uppercase tracking-widest ${order.status === OrderStatus.PENDING ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>{order.status}</span>
       </div>
       <h3 className="font-black text-slate-800 text-lg truncate uppercase italic leading-none">{order.customerName}</h3>
