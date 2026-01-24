@@ -16,7 +16,7 @@ interface OrderDetailsModalProps {
 }
 
 export default function OrderDetailsModal({ 
-  order, allOrders, onClose, onUpdate, onDelete, isSaving 
+  order, allOrders, onClose, onUpdate, onDelete, isSaving, currentUserName 
 }: OrderDetailsModalProps) {
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
   
@@ -76,7 +76,13 @@ export default function OrderDetailsModal({
   const handleConfirmStage = async () => {
     if (isSaving || isReadOnly) return;
     let nextStatus: OrderStatus = order.status;
-    if (order.status === OrderStatus.PENDING) nextStatus = OrderStatus.COMPLETED;
+    let autoReviewer = order.reviewer || currentUserName || 'SISTEMA';
+
+    if (order.status === OrderStatus.PENDING) {
+      nextStatus = OrderStatus.COMPLETED;
+      // ASIGNACIÓN AUTOMÁTICA AL PASAR A PREPARADO
+      autoReviewer = currentUserName || 'SISTEMA';
+    }
     else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
     else if (order.status === OrderStatus.DISPATCHED) nextStatus = OrderStatus.ARCHIVED;
 
@@ -88,6 +94,7 @@ export default function OrderDetailsModal({
     const updatedMainOrder: Order = {
       ...order,
       status: nextStatus,
+      reviewer: autoReviewer,
       warehouse: finalWarehouse,
       packageType: finalPackageType,
       packageQuantity: confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0),
@@ -105,7 +112,7 @@ export default function OrderDetailsModal({
           status: nextStatus,
           dispatchType: dispatchTypeSelection,
           dispatchValue: finalDispatchValue,
-          reviewer: order.reviewer
+          reviewer: autoReviewer
         });
       }
       onClose();
@@ -129,7 +136,6 @@ export default function OrderDetailsModal({
     }
   };
 
-  // Unified Button Class - Optimized height to py-3.5
   const actionButtonClass = "w-full py-3.5 rounded-[22px] font-black uppercase text-[10px] flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-md border-b-4";
 
   return (
@@ -141,7 +147,7 @@ export default function OrderDetailsModal({
         </button>
 
         <div className="pt-8 space-y-5">
-          {/* HEADER ROW */}
+          {/* HEADER ROW CON ASIGNACIÓN AUTOMÁTICA */}
           <div className="flex items-center justify-start gap-2.5 px-0.5">
             <div className="flex items-center gap-1.5 shrink-0">
               {!isReadOnly && (
@@ -178,7 +184,7 @@ export default function OrderDetailsModal({
               <div className="bg-slate-900 text-white px-3 py-2 rounded-2xl shadow-xl flex items-center gap-2 border border-white/10 min-w-[100px] max-w-[140px] justify-center overflow-hidden">
                 <Users size={11} className="text-orange-500 flex-shrink-0" />
                 <span className="text-[9px] font-black uppercase tracking-tight truncate">
-                  {order.reviewer || 'SIN ASIGNAR'}
+                  {order.reviewer || (order.status === OrderStatus.PENDING ? `OP: ${currentUserName || 'S/N'}` : 'SIN ASIGNAR')}
                 </span>
               </div>
               {!isReadOnly && (
@@ -200,7 +206,6 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* CUSTOMER INFO SECTION - REDUCED VERTICAL SPACE */}
           <div className="text-center bg-slate-50/70 py-4 rounded-[30px] border border-slate-200/50 shadow-inner">
             <h2 className="text-2xl font-black italic uppercase leading-none tracking-tighter text-slate-900 mb-2 px-6">{order.customerName}</h2>
             <div className="flex items-center justify-center gap-4">
@@ -216,7 +221,6 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* DEPÓSITO & FORMATO */}
           <div className="grid grid-cols-2 gap-3.5">
             <div className="space-y-1">
               <label className="text-[8px] font-black text-slate-400 uppercase ml-3 italic">Depósito Origen</label>
@@ -246,7 +250,6 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* CANTIDAD BOXES - COMPACTED HEIGHT */}
           <div className="grid grid-cols-2 gap-3.5">
             <div className="bg-indigo-50/70 p-3 rounded-[24px] border-2 border-indigo-100 text-center">
               <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest">Añadir Cant.</span>
@@ -259,7 +262,6 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* CONFIRMAR CARGA BUTTON */}
           {!isReadOnly && (
             <button 
               onClick={() => { if (currentQty <= 0) return; setConfirmedEntries([...confirmedEntries, { id: Date.now().toString(), deposit: warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection, type: packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection, quantity: currentQty }]); setCurrentQty(0); }} 
@@ -269,7 +271,6 @@ export default function OrderDetailsModal({
             </button>
           )}
 
-          {/* ENTRIES LIST */}
           {confirmedEntries.length > 0 && (
             <div className="space-y-2 max-h-32 overflow-y-auto no-scrollbar p-1">
               {confirmedEntries.map(e => (
@@ -281,7 +282,6 @@ export default function OrderDetailsModal({
             </div>
           )}
 
-          {/* DISPATCH DATA - COMPACTED HEIGHT */}
           <div className="bg-indigo-600 p-4 rounded-[28px] text-white space-y-2.5 shadow-xl relative overflow-hidden">
              <div className="absolute top-0 right-0 opacity-10 rotate-12 -mr-3 -mt-3"><Package size={60}/></div>
              <h3 className="text-[9px] font-black uppercase italic tracking-[0.2em] opacity-80 flex items-center gap-2"><Activity size={14}/> Datos de Despacho</h3>
@@ -301,7 +301,6 @@ export default function OrderDetailsModal({
              ) : null}
           </div>
 
-          {/* FINAL ACTIONS - UNIFIED BUTTONS */}
           <div className="space-y-2.5 pb-2">
             {!isReadOnly ? (
               <button 

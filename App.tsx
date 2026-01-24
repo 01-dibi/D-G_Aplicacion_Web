@@ -152,7 +152,6 @@ export default function App() {
         package_quantity: updatedOrder.packageQuantity,
         dispatch_type: updatedOrder.dispatchType,
         dispatch_value: updatedOrder.dispatchValue,
-        // Fix: Property 'detailed_packaging' does not exist on type 'Order'. Use 'detailedPackaging'.
         detailed_packaging: updatedOrder.detailedPackaging,
         customer_name: updatedOrder.customerName,
         customer_number: updatedOrder.customerNumber,
@@ -379,10 +378,10 @@ export default function App() {
         />
       )}
 
-      {/* STYLIZED BOTTOM NAVIGATION - TRIPLE BUTTON VERTICAL LAYOUT */}
+      {/* BARRA INFERIOR - DISEÑO VERTICAL CON 3 BOTONES */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-14 flex justify-around items-center max-w-md mx-auto rounded-t-[28px] shadow-[0_-8px_25px_-5px_rgba(0,0,0,0.1)] z-[1500]">
         
-        {/* Left: Nueva Carga */}
+        {/* Izquierda: Nueva Carga */}
         <button 
           onClick={() => setIsNewOrderModalOpen(true)}
           className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
@@ -393,7 +392,7 @@ export default function App() {
           <span className="text-[8px] font-black uppercase tracking-tight text-slate-500 group-hover:text-slate-900">NUEVA</span>
         </button>
 
-        {/* Center: ETAPAS Dashboard */}
+        {/* Centro: ETAPAS Dashboard */}
         <button 
           onClick={() => setView('DASHBOARD')}
           className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
@@ -404,7 +403,7 @@ export default function App() {
           <span className={`text-[8px] font-black uppercase tracking-tight ${view === 'DASHBOARD' ? 'text-orange-600' : 'text-slate-400'}`}>ETAPAS</span>
         </button>
 
-        {/* Right: Buscar Pedido */}
+        {/* Derecha: Buscar Pedido */}
         <button 
           onClick={() => setIsGlobalSearchOpen(true)}
           className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
