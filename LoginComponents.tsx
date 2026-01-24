@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { ShieldCheck, ArrowRight, Search, ArrowLeft, Loader2, KeyRound, User, AlertCircle, Database } from 'lucide-react';
+import { ShieldCheck, ArrowRight, Search, ArrowLeft, Loader2, KeyRound, User, AlertCircle, Database, AlertTriangle } from 'lucide-react';
 import { supabase, connectionStatus } from './supabaseClient.ts';
 
 export function LandingScreen({ onSelectStaff, onSelectCustomer }: any) {
@@ -25,6 +25,7 @@ export function LoginModal({ onLogin, onBack }: any) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [isResetMode, setIsResetMode] = useState(false);
+  const [showEmergencyBypass, setShowEmergencyBypass] = useState(false);
 
   const handleAuth = async () => {
     if (!username.trim() || !password.trim()) {
@@ -36,49 +37,52 @@ export function LoginModal({ onLogin, onBack }: any) {
     setError('');
 
     try {
-      // 1. Verificar si hay conexión básica
       if (!connectionStatus.isConfigured) {
-        throw new Error("Supabase no está configurado correctamente en las variables de entorno.");
+        throw new Error("Supabase no configurado. Usa el modo emergencia.");
       }
 
-      // 2. Intentar buscar al usuario
+      // Intentar buscar al usuario
       const { data: user, error: fetchError } = await supabase
         .from('app_users')
         .select('*')
         .eq('username', username.toUpperCase().trim())
-        .maybeSingle(); // Usamos maybeSingle para evitar el error PGRST116
+        .maybeSingle();
 
       if (fetchError) {
+        console.error("Fetch Error Detail:", fetchError);
+        setShowEmergencyBypass(true);
         if (fetchError.message.includes("relation \"app_users\" does not exist")) {
-          throw new Error("ERROR ADMIN: La tabla 'app_users' no existe en Supabase. Por favor, créala para habilitar el login.");
+          throw new Error("La tabla 'app_users' no existe en tu Supabase. Créala desde el panel SQL.");
         }
-        throw fetchError;
+        throw new Error("Error de conexión: Verifica tu internet o claves de Supabase.");
       }
 
       if (!user) {
         // MODO REGISTRO POR PRIMERA VEZ
-        if (confirm(`El usuario "${username.toUpperCase()}" no existe. ¿Deseas registrarlo con la contraseña ingresada?`)) {
+        const proceed = confirm(`El usuario "${username.toUpperCase()}" no existe.\n\n¿Deseas registrarlo con esta contraseña?`);
+        if (proceed) {
           const { error: insertError } = await supabase
             .from('app_users')
             .insert([{ username: username.toUpperCase().trim(), password_hash: password }]);
           
-          if (insertError) throw insertError;
+          if (insertError) {
+            setShowEmergencyBypass(true);
+            throw new Error("No se pudo registrar. Verifica permisos RLS.");
+          }
           onLogin({ name: username.toUpperCase().trim() });
         }
       } else {
         // MODO LOGIN / BLANQUEO
         if (isResetMode) {
-          // BLANQUEO DE CLAVE (Protocolo Admin)
           const { error: updateError } = await supabase
             .from('app_users')
             .update({ password_hash: password })
             .eq('username', username.toUpperCase().trim());
           
           if (updateError) throw updateError;
-          alert("Contraseña blanqueada con éxito. Ya puedes ingresar.");
+          alert("✅ Contraseña actualizada. Ya puedes ingresar.");
           setIsResetMode(false);
         } else {
-          // LOGIN NORMAL
           if (user.password_hash === password) {
             onLogin({ name: username.toUpperCase().trim() });
           } else {
@@ -87,10 +91,19 @@ export function LoginModal({ onLogin, onBack }: any) {
         }
       }
     } catch (err: any) {
-      console.error("Auth Error:", err);
-      setError(err.message || 'Error de conexión con el servidor');
+      console.error("Auth Fail:", err);
+      setError(err.message || 'Error inesperado');
+      setShowEmergencyBypass(true);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleEmergencyLogin = () => {
+    if (username.trim()) {
+      onLogin({ name: username.toUpperCase().trim() });
+    } else {
+      setError('Escribe un nombre para el modo emergencia');
     }
   };
 
@@ -147,14 +160,25 @@ export function LoginModal({ onLogin, onBack }: any) {
           </div>
         )}
 
-        <button 
-          onClick={handleAuth} 
-          disabled={isLoading}
-          className="w-full bg-slate-900 text-white py-6 rounded-[24px] font-black uppercase text-[11px] flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all disabled:opacity-50"
-        >
-          {isLoading ? <Loader2 className="animate-spin" size={20}/> : <ShieldCheck size={20}/>}
-          {isResetMode ? 'CAMBIAR CONTRASEÑA' : 'INICIAR SESIÓN'}
-        </button>
+        <div className="space-y-3">
+          <button 
+            onClick={handleAuth} 
+            disabled={isLoading}
+            className="w-full bg-slate-900 text-white py-6 rounded-[24px] font-black uppercase text-[11px] flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all disabled:opacity-50"
+          >
+            {isLoading ? <Loader2 className="animate-spin" size={20}/> : <ShieldCheck size={20}/>}
+            {isResetMode ? 'CAMBIAR CONTRASEÑA' : 'INICIAR SESIÓN'}
+          </button>
+
+          {showEmergencyBypass && (
+            <button 
+              onClick={handleEmergencyLogin}
+              className="w-full bg-orange-100 text-orange-700 py-4 rounded-[20px] font-black uppercase text-[9px] flex items-center justify-center gap-2 border-2 border-orange-200 animate-in fade-in slide-in-from-top-2"
+            >
+              <AlertTriangle size={14}/> ENTRAR COMO ADMIN (LOCAL)
+            </button>
+          )}
+        </div>
 
         <div className="pt-2">
           <button 
