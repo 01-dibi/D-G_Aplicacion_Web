@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
-  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus, Settings, AlertTriangle, Trash2, Layers, ChevronRight, Hash, User
+  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus, Settings, AlertTriangle, Trash2, Layers, ChevronRight, Hash, User, WifiOff
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types.ts';
 import { supabase, connectionStatus } from './supabaseClient.ts';
@@ -24,8 +24,9 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
+  const [isLocalMode, setIsLocalMode] = useState(false);
   
-  const [currentUser, setCurrentUser] = useState<{ name: string } | null>(() => {
+  const [currentUser, setCurrentUser] = useState<{ name: string, mode?: string } | null>(() => {
     try {
       const saved = localStorage.getItem('dg_user');
       return saved ? JSON.parse(saved) : null;
@@ -34,11 +35,24 @@ export default function App() {
 
   const [orders, setOrders] = useState<Order[]>([]);
 
+  // Función de respaldo para guardar localmente
+  const saveLocalOrders = (newOrders: Order[]) => {
+    localStorage.setItem('dg_local_orders', JSON.stringify(newOrders));
+    setOrders(newOrders);
+  };
+
   const fetchOrders = async () => {
-    if (!connectionStatus.isConfigured) {
+    setIsLoading(true);
+    
+    // Si entramos en modo local, cargamos de localStorage
+    if (currentUser?.mode === 'local') {
+      const local = localStorage.getItem('dg_local_orders');
+      if (local) setOrders(JSON.parse(local));
+      setIsLocalMode(true);
       setIsLoading(false);
       return;
     }
+
     try {
       const { data, error } = await supabase
         .from('orders')
@@ -68,42 +82,31 @@ export default function App() {
         deliveryData: o.delivery_data
       }));
       setOrders(mappedData);
+      setIsLocalMode(false);
     } catch (error) {
-      console.error("Fetch Error:", error);
+      console.warn("Switching to Local Mode due to fetch error:", error);
+      const local = localStorage.getItem('dg_local_orders');
+      if (local) setOrders(JSON.parse(local));
+      setIsLocalMode(true);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!currentUser || !connectionStatus.isConfigured) return;
-
-    const channel = supabase
-      .channel('realtime_orders')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'orders'
-        },
-        (payload) => {
-          fetchOrders();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [currentUser]);
-
-  useEffect(() => {
-    if (currentUser) {
-      setIsLandingMode(false);
-      fetchOrders();
-    } else {
+    if (!currentUser) {
       setIsLoading(false);
+      return;
+    }
+    setIsLandingMode(false);
+    fetchOrders();
+
+    if (currentUser.mode !== 'local' && connectionStatus.isConfigured) {
+      const channel = supabase
+        .channel('realtime_orders')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
+        .subscribe();
+      return () => { supabase.removeChannel(channel); };
     }
   }, [currentUser]);
 
@@ -142,6 +145,14 @@ export default function App() {
 
   const handleUpdateOrder = async (updatedOrder: Order) => {
     setIsSaving(true);
+    if (isLocalMode || currentUser?.mode === 'local') {
+      const newOrders = orders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
+      saveLocalOrders(newOrders);
+      setSelectedOrder(updatedOrder);
+      setIsSaving(false);
+      return true;
+    }
+
     try {
       const fullPayload = {
         status: updatedOrder.status,
@@ -164,8 +175,10 @@ export default function App() {
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
-      alert(`Error de sincronización: ${err.message}`);
-      return false;
+      alert(`Error de sincronización. Guardando localmente.`);
+      const newOrders = orders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
+      saveLocalOrders(newOrders);
+      return true;
     } finally {
       setIsSaving(false);
     }
@@ -173,6 +186,24 @@ export default function App() {
 
   const handleCreateOrder = async (newOrder: Partial<Order>) => {
     setIsSaving(true);
+    const orderToAdd: Order = {
+      id: Math.random().toString(36).substr(2, 9),
+      orderNumber: newOrder.orderNumber || '',
+      customerNumber: newOrder.customerNumber || '',
+      customerName: newOrder.customerName || '',
+      locality: newOrder.locality || '',
+      notes: newOrder.notes || '',
+      status: OrderStatus.PENDING,
+      source: newOrder.source || 'Manual',
+      createdAt: new Date().toISOString()
+    };
+
+    if (isLocalMode || currentUser?.mode === 'local') {
+      saveLocalOrders([orderToAdd, ...orders]);
+      setIsSaving(false);
+      return true;
+    }
+
     try {
       const { error } = await supabase.from('orders').insert([{
         order_number: newOrder.orderNumber,
@@ -186,8 +217,8 @@ export default function App() {
       if (error) throw error;
       return true;
     } catch (err) {
-      alert("Error al crear el pedido.");
-      return false;
+      saveLocalOrders([orderToAdd, ...orders]);
+      return true;
     } finally {
       setIsSaving(false);
     }
@@ -196,28 +227,38 @@ export default function App() {
   const handleDeleteOrder = async (orderId: string) => {
     if (!confirm("¿Eliminar registro permanentemente?")) return;
     setIsSaving(true);
+    if (isLocalMode || currentUser?.mode === 'local') {
+      saveLocalOrders(orders.filter(o => o.id !== orderId));
+      setSelectedOrder(null);
+      setIsSaving(false);
+      return;
+    }
     try {
       await supabase.from('orders').delete().eq('id', orderId);
       setSelectedOrder(null);
     } catch (err) {
-      alert("Error al eliminar.");
+      saveLocalOrders(orders.filter(o => o.id !== orderId));
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleResetDatabase = async () => {
-    const firstConfirm = confirm("⚠️ ATENCIÓN: ¿Estás seguro de que deseas borrar TODOS los pedidos de la base de datos?");
+    const firstConfirm = confirm("⚠️ BORRAR TODO: ¿Estás seguro?");
     if (!firstConfirm) return;
     setIsSaving(true);
+    
+    if (isLocalMode || currentUser?.mode === 'local') {
+      saveLocalOrders([]);
+      setIsSaving(false);
+      return;
+    }
+
     try {
-      const { error } = await supabase.from('orders').delete().filter('id', 'not.is', null);
-      if (error) throw error;
-      alert("✅ Base de datos reseteada.");
-      setView('DASHBOARD');
+      await supabase.from('orders').delete().filter('id', 'not.is', null);
       fetchOrders();
     } catch (err: any) {
-      alert(`Error: ${err.message}`);
+      saveLocalOrders([]);
     } finally {
       setIsSaving(false);
     }
@@ -229,6 +270,12 @@ export default function App() {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-20 font-sans relative">
+      {isLocalMode && (
+        <div className="bg-amber-500 text-white text-[8px] font-black uppercase tracking-[0.2em] py-1 px-4 flex items-center justify-center gap-2 animate-pulse">
+          <WifiOff size={10}/> Modo Local Activo (Sin Conexión a Servidor)
+        </div>
+      )}
+
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-slate-900/60 z-[2000]" onClick={() => setIsSidebarOpen(false)}>
           <div className="absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-2xl animate-in slide-in-from-left duration-300" onClick={e => e.stopPropagation()}>
@@ -238,7 +285,7 @@ export default function App() {
                  <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center font-black">{currentUser.name[0]}</div>
                  <div>
                     <p className="text-sm font-bold leading-none">{currentUser.name}</p>
-                    <p className="text-[9px] uppercase tracking-widest text-slate-400 mt-1">Operador Logístico</p>
+                    <p className="text-[9px] uppercase tracking-widest text-slate-400 mt-1">{isLocalMode ? 'Operador Local' : 'Operador Nube'}</p>
                  </div>
               </div>
             </div>
@@ -378,42 +425,26 @@ export default function App() {
         />
       )}
 
-      {/* BARRA INFERIOR - DISEÑO VERTICAL - ACCESOS DIRECTOS */}
+      {/* BARRA INFERIOR */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-14 flex justify-around items-center max-w-md mx-auto rounded-t-[28px] shadow-[0_-8px_25px_-5px_rgba(0,0,0,0.1)] z-[1500]">
-        
-        {/* Izquierda: Nueva Carga */}
-        <button 
-          onClick={() => { setView('DASHBOARD'); setIsNewOrderModalOpen(true); }}
-          className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
-        >
+        <button onClick={() => { setView('DASHBOARD'); setIsNewOrderModalOpen(true); }} className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all">
           <div className="w-8 h-8 bg-slate-900 text-white rounded-lg flex items-center justify-center shadow-md mb-0.5">
             <Plus size={18} strokeWidth={3} />
           </div>
           <span className="text-[8px] font-black uppercase tracking-tight text-slate-500 group-hover:text-slate-900">NUEVA</span>
         </button>
-
-        {/* Centro: ETAPAS Dashboard */}
-        <button 
-          onClick={() => setView('DASHBOARD')}
-          className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
-        >
+        <button onClick={() => setView('DASHBOARD')} className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all">
           <div className={`p-1.5 transition-colors ${view === 'DASHBOARD' ? 'text-orange-500' : 'text-slate-300'}`}>
             <LayoutDashboard size={24} strokeWidth={2.5} />
           </div>
           <span className={`text-[8px] font-black uppercase tracking-tight ${view === 'DASHBOARD' ? 'text-orange-600' : 'text-slate-400'}`}>ETAPAS</span>
         </button>
-
-        {/* Derecha: Buscar Pedido */}
-        <button 
-          onClick={() => setIsGlobalSearchOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
-        >
+        <button onClick={() => setIsGlobalSearchOpen(true)} className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all">
           <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center border border-indigo-100 shadow-inner mb-0.5">
             <Search size={18} strokeWidth={3} />
           </div>
           <span className="text-[8px] font-black uppercase tracking-tight text-slate-500 group-hover:text-indigo-600">BUSCAR</span>
         </button>
-        
       </nav>
     </div>
   );
