@@ -50,6 +50,11 @@ export function OrderCard({ order, onClick }: any) {
     [OrderStatus.ARCHIVED]: 'bg-slate-100 text-slate-500 border-slate-200'
   };
 
+  // Cálculo dinámico del total de bultos sumando el detalle acumulado
+  const totalBultos = order.detailedPackaging && order.detailedPackaging.length > 0
+    ? order.detailedPackaging.reduce((sum: number, entry: any) => sum + (entry.quantity || 0), 0)
+    : (order.packageQuantity || 0);
+
   return (
     <div onClick={onClick} className="bg-white rounded-[35px] border-2 border-slate-100 shadow-sm relative overflow-hidden active:scale-[0.98] transition-all flex h-auto min-h-[160px]">
       {order.source === 'IA' && (
@@ -79,7 +84,7 @@ export function OrderCard({ order, onClick }: any) {
 
         <div className="bg-slate-50 self-start px-4 py-2 rounded-2xl flex items-center gap-2">
           <Package size={16} className="text-slate-400" />
-          <span className="text-sm font-black text-slate-700">{order.packageQuantity || 0} <span className="text-[10px] text-slate-400 uppercase ml-1">Bultos Totales</span></span>
+          <span className="text-sm font-black text-slate-700">{totalBultos} <span className="text-[10px] text-slate-400 uppercase ml-1">Bultos Totales</span></span>
         </div>
       </div>
 
