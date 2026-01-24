@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { ShieldCheck, ArrowRight, Search, ArrowLeft, Loader2, KeyRound, User, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { supabase } from './supabaseClient.ts';
+import { ShieldCheck, ArrowRight, Search, ArrowLeft, Loader2, KeyRound, User, AlertCircle, Database } from 'lucide-react';
+import { supabase, connectionStatus } from './supabaseClient.ts';
 
 export function LandingScreen({ onSelectStaff, onSelectCustomer }: any) {
   return (
@@ -36,14 +36,24 @@ export function LoginModal({ onLogin, onBack }: any) {
     setError('');
 
     try {
-      // Intentar buscar al usuario en una tabla dedicada de la base de datos
+      // 1. Verificar si hay conexión básica
+      if (!connectionStatus.isConfigured) {
+        throw new Error("Supabase no está configurado correctamente en las variables de entorno.");
+      }
+
+      // 2. Intentar buscar al usuario
       const { data: user, error: fetchError } = await supabase
         .from('app_users')
         .select('*')
         .eq('username', username.toUpperCase().trim())
-        .single();
+        .maybeSingle(); // Usamos maybeSingle para evitar el error PGRST116
 
-      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+      if (fetchError) {
+        if (fetchError.message.includes("relation \"app_users\" does not exist")) {
+          throw new Error("ERROR ADMIN: La tabla 'app_users' no existe en Supabase. Por favor, créala para habilitar el login.");
+        }
+        throw fetchError;
+      }
 
       if (!user) {
         // MODO REGISTRO POR PRIMERA VEZ
@@ -58,16 +68,15 @@ export function LoginModal({ onLogin, onBack }: any) {
       } else {
         // MODO LOGIN / BLANQUEO
         if (isResetMode) {
-          // BLANQUEO DE CLAVE
+          // BLANQUEO DE CLAVE (Protocolo Admin)
           const { error: updateError } = await supabase
             .from('app_users')
             .update({ password_hash: password })
             .eq('username', username.toUpperCase().trim());
           
           if (updateError) throw updateError;
-          alert("Contraseña actualizada con éxito.");
+          alert("Contraseña blanqueada con éxito. Ya puedes ingresar.");
           setIsResetMode(false);
-          onLogin({ name: username.toUpperCase().trim() });
         } else {
           // LOGIN NORMAL
           if (user.password_hash === password) {
@@ -78,8 +87,8 @@ export function LoginModal({ onLogin, onBack }: any) {
         }
       }
     } catch (err: any) {
-      console.error(err);
-      setError('Error de conexión con el servidor');
+      console.error("Auth Error:", err);
+      setError(err.message || 'Error de conexión con el servidor');
     } finally {
       setIsLoading(false);
     }
@@ -93,58 +102,66 @@ export function LoginModal({ onLogin, onBack }: any) {
         </button>
 
         <div className="pt-4 flex flex-col items-center">
-          <h1 className="text-7xl font-black italic text-slate-900 leading-none mb-6">D<span className="text-orange-500">&</span>G</h1>
+          <div className="w-16 h-16 bg-slate-50 rounded-[24px] flex items-center justify-center mb-6 shadow-inner">
+             <Database className="text-orange-500" size={32} />
+          </div>
           <h1 className="text-3xl font-black italic text-slate-800 mb-1 uppercase tracking-tighter">
-            {isResetMode ? 'Blanqueo Clave' : 'Ingreso'}
+            {isResetMode ? 'Blanqueo Clave' : 'Ingreso D&G'}
           </h1>
-          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest">Protocolo de Acceso Seguro</p>
+          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none">Protocolo Administrativo</p>
         </div>
 
-        <div className="space-y-4">
-          <div className="relative">
-            <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
-            <input 
-              className="w-full bg-slate-50 p-5 pl-14 rounded-[24px] font-black text-sm outline-none border-2 border-transparent focus:border-indigo-500 uppercase shadow-inner" 
-              placeholder="NOMBRE" 
-              value={username} 
-              onChange={e => { setUsername(e.target.value); setError(''); }} 
-            />
+        <div className="space-y-4 text-left">
+          <div className="space-y-1">
+            <label className="text-[8px] font-black text-slate-400 uppercase ml-4">Nombre de Operador</label>
+            <div className="relative">
+              <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+              <input 
+                className="w-full bg-slate-50 p-5 pl-14 rounded-[24px] font-black text-sm outline-none border-2 border-transparent focus:border-indigo-500 uppercase shadow-inner" 
+                placeholder="EJ: ADMIN" 
+                value={username} 
+                onChange={e => { setUsername(e.target.value); setError(''); }} 
+              />
+            </div>
           </div>
 
-          <div className="relative">
-            <KeyRound className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
-            <input 
-              type="password"
-              className="w-full bg-slate-50 p-5 pl-14 rounded-[24px] font-black text-sm outline-none border-2 border-transparent focus:border-indigo-500 uppercase shadow-inner" 
-              placeholder="PASSWORD" 
-              value={password} 
-              onChange={e => { setPassword(e.target.value); setError(''); }} 
-            />
+          <div className="space-y-1">
+            <label className="text-[8px] font-black text-slate-400 uppercase ml-4">Contraseña Personal</label>
+            <div className="relative">
+              <KeyRound className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+              <input 
+                type="password"
+                className="w-full bg-slate-50 p-5 pl-14 rounded-[24px] font-black text-sm outline-none border-2 border-transparent focus:border-indigo-500 uppercase shadow-inner" 
+                placeholder="••••••••" 
+                value={password} 
+                onChange={e => { setPassword(e.target.value); setError(''); }} 
+              />
+            </div>
           </div>
         </div>
 
         {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
-            <AlertCircle size={18} />
-            <span className="text-[10px] font-black uppercase">{error}</span>
+          <div className="bg-red-50 text-red-600 p-5 rounded-[24px] border border-red-100 flex items-start gap-3 text-left animate-in shake">
+            <AlertCircle size={20} className="shrink-0 mt-0.5" />
+            <span className="text-[9px] font-black uppercase leading-tight">{error}</span>
           </div>
         )}
 
         <button 
           onClick={handleAuth} 
           disabled={isLoading}
-          className="w-full bg-slate-900 text-white py-6 rounded-[24px] font-black uppercase text-xs flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all disabled:opacity-50"
+          className="w-full bg-slate-900 text-white py-6 rounded-[24px] font-black uppercase text-[11px] flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all disabled:opacity-50"
         >
-          {isLoading ? <Loader2 className="animate-spin" size={20}/> : <ShieldCheck size={18}/>}
-          {isResetMode ? 'CONFIRMAR CAMBIO' : 'ACCEDER AL SISTEMA'}
+          {isLoading ? <Loader2 className="animate-spin" size={20}/> : <ShieldCheck size={20}/>}
+          {isResetMode ? 'CAMBIAR CONTRASEÑA' : 'INICIAR SESIÓN'}
         </button>
 
-        <div className="flex flex-col gap-3 pt-2">
+        <div className="pt-2">
           <button 
-            onClick={() => setIsResetMode(!isResetMode)} 
-            className="text-[10px] font-black uppercase text-indigo-600 tracking-tighter hover:underline"
+            onClick={() => { setIsResetMode(!isResetMode); setError(''); }} 
+            className="text-[9px] font-black uppercase text-indigo-600 tracking-tight hover:underline flex items-center justify-center gap-2 mx-auto"
           >
-            {isResetMode ? 'VOLVER AL INGRESO' : '¿OLVIDASTE TU CLAVE? BLANQUEO'}
+            {isResetMode ? '← VOLVER AL INICIO' : '¿PROBLEMAS CON LA CLAVE? BLANQUEO'}
           </button>
         </div>
       </div>

@@ -378,12 +378,12 @@ export default function App() {
         />
       )}
 
-      {/* BARRA INFERIOR - DISEÑO VERTICAL CON 3 BOTONES */}
+      {/* BARRA INFERIOR - DISEÑO VERTICAL - ACCESOS DIRECTOS */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-14 flex justify-around items-center max-w-md mx-auto rounded-t-[28px] shadow-[0_-8px_25px_-5px_rgba(0,0,0,0.1)] z-[1500]">
         
         {/* Izquierda: Nueva Carga */}
         <button 
-          onClick={() => setIsNewOrderModalOpen(true)}
+          onClick={() => { setView('DASHBOARD'); setIsNewOrderModalOpen(true); }}
           className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
         >
           <div className="w-8 h-8 bg-slate-900 text-white rounded-lg flex items-center justify-center shadow-md mb-0.5">
