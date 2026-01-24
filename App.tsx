@@ -228,7 +228,7 @@ export default function App() {
   if (!currentUser) return <LoginModal onLogin={u => { setCurrentUser(u); localStorage.setItem('dg_user', JSON.stringify(u)); }} onBack={() => setIsLandingMode(true)} />;
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-24 font-sans relative">
+    <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-20 font-sans relative">
       {isSidebarOpen && (
         <div className="fixed inset-0 bg-slate-900/60 z-[2000]" onClick={() => setIsSidebarOpen(false)}>
           <div className="absolute left-0 top-0 bottom-0 w-72 bg-white flex flex-col shadow-2xl animate-in slide-in-from-left duration-300" onClick={e => e.stopPropagation()}>
@@ -242,7 +242,7 @@ export default function App() {
                  </div>
               </div>
             </div>
-            <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+            <nav className="flex-1 p-4 space-y-1 overflow-y-auto no-scrollbar">
               <SidebarItem icon={<LayoutDashboard size={20}/>} label="Dashboard" active={view === 'DASHBOARD'} onClick={() => { setView('DASHBOARD'); setIsSidebarOpen(false); }} />
               <div className="h-px bg-slate-100 my-4" />
               <SidebarItem icon={<ClipboardList size={20}/>} label="Pendientes" active={view === 'PENDING'} onClick={() => { setView('PENDING'); setIsSidebarOpen(false); }} />
@@ -252,7 +252,7 @@ export default function App() {
               <SidebarItem icon={<History size={20}/>} label="Historial" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<Settings size={20}/>} label="Mantenimiento" active={view === 'MAINTENANCE'} onClick={() => { setView('MAINTENANCE'); setIsSidebarOpen(false); }} />
             </nav>
-            <div className="p-4 border-t bg-slate-50">
+            <div className="p-6 border-t bg-slate-50 mt-auto">
                <SidebarItem icon={<LogOut size={20}/>} label="Cerrar Sesión" onClick={() => { setCurrentUser(null); localStorage.removeItem('dg_user'); }} danger />
             </div>
           </div>
@@ -378,29 +378,29 @@ export default function App() {
         />
       )}
 
-      {/* Redesigned Bottom Navigation: Two distributed icons */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t px-12 h-20 flex justify-between items-center max-w-md mx-auto rounded-t-[35px] shadow-[0_-10px_30px_-5px_rgba(0,0,0,0.08)] z-[1500]">
+      {/* Redesigned Bottom Navigation: Two distributed icons - Sleeker/Smaller */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t px-12 h-16 flex justify-between items-center max-w-md mx-auto rounded-t-[30px] shadow-[0_-10px_30px_-5px_rgba(0,0,0,0.1)] z-[1500]">
         
         {/* Left: New Order (+) */}
         <button 
           onClick={() => setIsNewOrderModalOpen(true)}
-          className="flex flex-col items-center gap-1 group"
+          className="flex flex-col items-center gap-1 group py-1"
         >
-          <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition-all border-2 border-white group-hover:bg-black">
-            <Plus size={22} strokeWidth={3} />
+          <div className="w-10 h-10 bg-slate-900 text-white rounded-[14px] flex items-center justify-center shadow-md active:scale-90 transition-all border-2 border-white group-hover:bg-black">
+            <Plus size={20} strokeWidth={3} />
           </div>
           <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400">NUEVA CARGA</span>
         </button>
 
-        <div className="h-8 w-px bg-slate-100" />
+        <div className="h-6 w-px bg-slate-100" />
 
         {/* Right: Search (Lupa) */}
         <button 
           onClick={() => setIsGlobalSearchOpen(true)}
-          className="flex flex-col items-center gap-1 group"
+          className="flex flex-col items-center gap-1 group py-1"
         >
-          <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center shadow-inner active:scale-90 transition-all border-2 border-transparent group-hover:border-indigo-100">
-            <Search size={22} strokeWidth={3} />
+          <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-[14px] flex items-center justify-center shadow-inner active:scale-90 transition-all border-2 border-transparent group-hover:border-indigo-100">
+            <Search size={20} strokeWidth={3} />
           </div>
           <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400">BUSCAR PEDIDO</span>
         </button>
