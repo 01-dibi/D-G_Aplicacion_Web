@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, ArrowRight, Search, ArrowLeft, Loader2, KeyRound, User, AlertCircle, Database, AlertTriangle, WifiOff, Zap, RefreshCw } from 'lucide-react';
+import { ShieldCheck, ArrowRight, Search, ArrowLeft, Loader2, KeyRound, User, AlertCircle, Database, AlertTriangle, WifiOff, Zap, RefreshCw, Key } from 'lucide-react';
 import { supabase, connectionStatus } from './supabaseClient.ts';
 
 export function LandingScreen({ onSelectStaff, onSelectCustomer }: any) {
@@ -24,6 +24,7 @@ export function LoginModal({ onLogin, onBack }: any) {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showReset, setShowReset] = useState(false);
 
   const handleCloudLogin = async () => {
     if (!password.trim()) {
@@ -33,19 +34,14 @@ export function LoginModal({ onLogin, onBack }: any) {
 
     setIsLoading(true);
     setError('');
+    setShowReset(false);
 
     try {
-      // Intentamos con un timeout manual para no dejar colgado al usuario
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
       const { data: user, error: fetchError } = await supabase
         .from('app_users')
         .select('*')
         .eq('username', username.toUpperCase().trim())
         .maybeSingle();
-
-      clearTimeout(timeoutId);
 
       if (fetchError) throw fetchError;
 
@@ -62,35 +58,51 @@ export function LoginModal({ onLogin, onBack }: any) {
           onLogin({ name: username.toUpperCase().trim(), mode: 'cloud' });
         } else {
           setError('Contraseña incorrecta');
+          setShowReset(true);
         }
       }
     } catch (err: any) {
       console.error("Cloud error:", err);
-      // AUTO-REDIRECCIÓN EN CASO DE ERROR
-      const proceed = confirm("Error de conexión con el servidor de nube.\n\n¿Deseas entrar en MODO LOCAL para poder trabajar ahora mismo?");
+      const proceed = confirm("Fallo de conexión con Supabase (RLS o Red).\n\n¿Quieres usar el ACCESO DE EMERGENCIA local?");
       if (proceed) {
         onLogin({ name: username.toUpperCase() || 'ADMIN', mode: 'local' });
       } else {
-        setError("El servidor de Supabase no responde o la tabla 'app_users' no existe.");
+        setError("Error de Nube: Verifica tus tablas y RLS en Supabase.");
       }
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleResetPassword = async () => {
+    if (!confirm(`¿Estás seguro de blanquear la clave para ${username}? \n\nEsto borrará tu usuario de la nube para que puedas elegir una clave nueva.`)) return;
+    
+    setIsLoading(true);
+    try {
+      const { error: delError } = await supabase
+        .from('app_users')
+        .delete()
+        .eq('username', username.toUpperCase().trim());
+      
+      if (delError) throw delError;
+      
+      alert("Clave blanqueada con éxito. Ahora ingresa tu nueva clave y dale a LOGUEAR Y SINCRONIZAR.");
+      setError('');
+      setShowReset(false);
+      setPassword('');
+    } catch (err: any) {
+      alert("No se pudo blanquear automáticamente (Posible falta de permisos RLS). \n\nPor favor, usa el Acceso de Emergencia azul.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleDirectAccess = () => {
-    // ESTE BOTÓN AHORA ES INFALIBLE
     setError('');
     setIsLoading(true);
     setTimeout(() => {
       onLogin({ name: username.toUpperCase() || 'ADMIN', mode: 'local' });
-    }, 500);
-  };
-
-  const clearCache = () => {
-    localStorage.clear();
-    alert("Memoria limpia. Reiniciando...");
-    window.location.reload();
+    }, 400);
   };
 
   return (
@@ -101,7 +113,7 @@ export function LoginModal({ onLogin, onBack }: any) {
           <ArrowLeft size={24}/>
         </button>
 
-        <button onClick={clearCache} title="Reiniciar App" className="absolute top-10 right-10 text-slate-200 hover:text-orange-500 transition-colors">
+        <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="absolute top-10 right-10 text-slate-200 hover:text-orange-500">
           <RefreshCw size={20}/>
         </button>
 
@@ -110,14 +122,14 @@ export function LoginModal({ onLogin, onBack }: any) {
              <ShieldCheck className="text-orange-500" size={32} />
           </div>
           <h1 className="text-3xl font-black italic text-slate-800 mb-1 uppercase tracking-tighter">
-            Entrada D&G
+            Control D&G
           </h1>
-          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none">Gestión Segura</p>
+          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none">Blanqueo de Claves v3.1</p>
         </div>
 
         <div className="space-y-4 text-left">
           <div className="space-y-1">
-            <label className="text-[8px] font-black text-slate-400 uppercase ml-4">Nombre del Operador</label>
+            <label className="text-[8px] font-black text-slate-400 uppercase ml-4">Usuario</label>
             <div className="relative">
               <User className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
               <input 
@@ -134,32 +146,40 @@ export function LoginModal({ onLogin, onBack }: any) {
           <div className="bg-red-50 text-red-700 p-4 rounded-[20px] border border-red-100 flex flex-col items-center gap-1 text-center animate-in shake">
             <AlertCircle size={16} className="text-red-500" />
             <p className="text-[8px] font-black uppercase leading-tight">{error}</p>
+            {showReset && (
+              <button 
+                onClick={handleResetPassword}
+                className="mt-2 text-[8px] font-black bg-white text-red-600 px-3 py-1.5 rounded-full border border-red-200 shadow-sm hover:bg-red-600 hover:text-white transition-all uppercase"
+              >
+                ¿Olvidaste la clave? Blanquear ahora
+              </button>
+            )}
           </div>
         )}
 
         <div className="space-y-4 pt-2">
-          {/* BOTÓN MAESTRO - ESTE SIEMPRE FUNCIONA */}
+          {/* ACCESO DE EMERGENCIA */}
           <button 
             onClick={handleDirectAccess}
             className="w-full bg-indigo-600 text-white py-7 rounded-[30px] font-black uppercase text-[11px] flex flex-col items-center justify-center gap-1 shadow-[0_20px_40px_-10px_rgba(79,70,229,0.4)] active:scale-95 transition-all border-b-4 border-indigo-800"
           >
             <div className="flex items-center gap-2">
                {isLoading ? <Loader2 className="animate-spin" size={18}/> : <Zap size={18} className="fill-white"/>}
-               <span>ENTRAR AHORA (MODO LOCAL)</span>
+               <span>ACCESO DE EMERGENCIA</span>
             </div>
-            <span className="text-[7px] opacity-60">EVITA CUALQUIER ERROR DE SERVIDOR</span>
+            <span className="text-[7px] opacity-60">SIN CLAVE - MODO LOCAL</span>
           </button>
 
           <div className="relative py-2">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
-            <div className="relative flex justify-center text-[8px]"><span className="bg-white px-2 text-slate-300 font-black uppercase tracking-widest">O Sincronizar Nube</span></div>
+            <div className="relative flex justify-center text-[8px]"><span className="bg-white px-2 text-slate-300 font-black uppercase tracking-widest">Sincronización Nube</span></div>
           </div>
 
           <div className="space-y-3">
              <input 
                 type="password"
                 className="w-full bg-slate-50 p-4 rounded-[20px] font-black text-xs outline-none border border-slate-100 uppercase text-center" 
-                placeholder="CLAVE DE NUBE" 
+                placeholder="NUEVA CLAVE O ACTUAL" 
                 value={password} 
                 onChange={e => setPassword(e.target.value)} 
               />
@@ -169,12 +189,12 @@ export function LoginModal({ onLogin, onBack }: any) {
                 className="w-full bg-slate-100 text-slate-500 py-4 rounded-[20px] font-black uppercase text-[9px] flex items-center justify-center gap-2 hover:bg-slate-200 transition-all disabled:opacity-50"
               >
                 {isLoading ? <Loader2 className="animate-spin" size={14}/> : <Database size={14}/>}
-                LOGUEAR Y SINCRONIZAR
+                LOGUEAR Y ACTUALIZAR CLAVE
               </button>
           </div>
         </div>
 
-        <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">V3.0 Bypass Garantizado</p>
+        <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">D&G Logística - Soporte Total</p>
       </div>
     </div>
   );

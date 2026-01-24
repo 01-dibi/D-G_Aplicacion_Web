@@ -35,7 +35,6 @@ export default function App() {
 
   const [orders, setOrders] = useState<Order[]>([]);
 
-  // Función de respaldo para guardar localmente
   const saveLocalOrders = (newOrders: Order[]) => {
     localStorage.setItem('dg_local_orders', JSON.stringify(newOrders));
     setOrders(newOrders);
@@ -44,7 +43,7 @@ export default function App() {
   const fetchOrders = async () => {
     setIsLoading(true);
     
-    // Si entramos en modo local, cargamos de localStorage
+    // Prioridad local si el usuario lo eligió
     if (currentUser?.mode === 'local') {
       const local = localStorage.getItem('dg_local_orders');
       if (local) setOrders(JSON.parse(local));
@@ -54,12 +53,26 @@ export default function App() {
     }
 
     try {
-      const { data, error } = await supabase
+      // Intento de fetch con timeout para no bloquear la UI
+      const fetchPromise = supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false });
+
+      // Timeout de 4 segundos
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), 4000)
+      );
+
+      const { data, error }: any = await Promise.race([fetchPromise, timeoutPromise]);
       
-      if (error) throw error;
+      if (error) {
+        // Si el error es 42P01 significa que la tabla no existe en Supabase
+        if (error.code === '42P01' || error.code === 'PGRST116') {
+          console.warn("Tabla no encontrada en Supabase. Usando modo local.");
+        }
+        throw error;
+      }
 
       const mappedData = (data || []).map((o: any) => ({
         id: o.id,
@@ -83,8 +96,8 @@ export default function App() {
       }));
       setOrders(mappedData);
       setIsLocalMode(false);
-    } catch (error) {
-      console.warn("Switching to Local Mode due to fetch error:", error);
+    } catch (error: any) {
+      console.warn("Conmutando a MODO LOCAL por error de servidor:", error.message);
       const local = localStorage.getItem('dg_local_orders');
       if (local) setOrders(JSON.parse(local));
       setIsLocalMode(true);
@@ -101,7 +114,7 @@ export default function App() {
     setIsLandingMode(false);
     fetchOrders();
 
-    if (currentUser.mode !== 'local' && connectionStatus.isConfigured) {
+    if (currentUser.mode !== 'local' && !isLocalMode) {
       const channel = supabase
         .channel('realtime_orders')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
@@ -154,7 +167,7 @@ export default function App() {
     }
 
     try {
-      const fullPayload = {
+      const { error } = await supabase.from('orders').update({
         status: updatedOrder.status,
         notes: updatedOrder.notes,
         carrier: updatedOrder.carrier,
@@ -169,13 +182,12 @@ export default function App() {
         locality: updatedOrder.locality,
         order_number: updatedOrder.orderNumber,
         reviewer: updatedOrder.reviewer
-      };
-      const { error } = await supabase.from('orders').update(fullPayload).eq('id', updatedOrder.id);
+      }).eq('id', updatedOrder.id);
+      
       if (error) throw error;
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
-      alert(`Error de sincronización. Guardando localmente.`);
       const newOrders = orders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
       saveLocalOrders(newOrders);
       return true;
@@ -215,6 +227,7 @@ export default function App() {
         source: newOrder.source || 'Manual'
       }]);
       if (error) throw error;
+      fetchOrders();
       return true;
     } catch (err) {
       saveLocalOrders([orderToAdd, ...orders]);
@@ -225,7 +238,7 @@ export default function App() {
   };
 
   const handleDeleteOrder = async (orderId: string) => {
-    if (!confirm("¿Eliminar registro permanentemente?")) return;
+    if (!confirm("¿Eliminar registro?")) return;
     setIsSaving(true);
     if (isLocalMode || currentUser?.mode === 'local') {
       saveLocalOrders(orders.filter(o => o.id !== orderId));
@@ -235,6 +248,7 @@ export default function App() {
     }
     try {
       await supabase.from('orders').delete().eq('id', orderId);
+      fetchOrders();
       setSelectedOrder(null);
     } catch (err) {
       saveLocalOrders(orders.filter(o => o.id !== orderId));
@@ -244,16 +258,13 @@ export default function App() {
   };
 
   const handleResetDatabase = async () => {
-    const firstConfirm = confirm("⚠️ BORRAR TODO: ¿Estás seguro?");
-    if (!firstConfirm) return;
+    if (!confirm("⚠️ SE BORRARÁ TODO. ¿Continuar?")) return;
     setIsSaving(true);
-    
     if (isLocalMode || currentUser?.mode === 'local') {
       saveLocalOrders([]);
       setIsSaving(false);
       return;
     }
-
     try {
       await supabase.from('orders').delete().filter('id', 'not.is', null);
       fetchOrders();
@@ -271,8 +282,8 @@ export default function App() {
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-20 font-sans relative">
       {isLocalMode && (
-        <div className="bg-amber-500 text-white text-[8px] font-black uppercase tracking-[0.2em] py-1 px-4 flex items-center justify-center gap-2 animate-pulse">
-          <WifiOff size={10}/> Modo Local Activo (Sin Conexión a Servidor)
+        <div className="bg-amber-500 text-white text-[8px] font-black uppercase tracking-[0.2em] py-1 px-4 flex items-center justify-center gap-2 sticky top-0 z-[100]">
+          <WifiOff size={10}/> Modo Local (Base de datos desconectada)
         </div>
       )}
 
@@ -285,7 +296,7 @@ export default function App() {
                  <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center font-black">{currentUser.name[0]}</div>
                  <div>
                     <p className="text-sm font-bold leading-none">{currentUser.name}</p>
-                    <p className="text-[9px] uppercase tracking-widest text-slate-400 mt-1">{isLocalMode ? 'Operador Local' : 'Operador Nube'}</p>
+                    <p className="text-[9px] uppercase tracking-widest text-slate-400 mt-1">{isLocalMode ? 'Operador Local' : 'Sincronizado'}</p>
                  </div>
               </div>
             </div>
@@ -309,7 +320,9 @@ export default function App() {
       <header className="bg-slate-900 text-white p-6 rounded-b-[32px] shadow-md flex justify-between items-center sticky top-0 z-50">
         <button onClick={() => setIsSidebarOpen(true)} className="p-2 bg-white/10 rounded-xl active:scale-95 transition-all"><Menu size={20} /></button>
         <h1 className="text-lg font-bold uppercase italic leading-none text-center">D&G <span className="text-orange-500">Logística</span></h1>
-        <div className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center font-bold shadow-inner" onClick={fetchOrders}>{currentUser.name[0]}</div>
+        <div className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center font-bold shadow-inner cursor-pointer" onClick={fetchOrders}>
+          {isLoading ? <Loader2 className="animate-spin" size={16}/> : currentUser.name[0]}
+        </div>
       </header>
 
       <main className="p-5 space-y-6">
@@ -354,7 +367,7 @@ export default function App() {
             </div>
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-              <input type="text" placeholder="Buscar en esta vista..." className="w-full bg-white border-2 border-slate-100 rounded-[22px] py-4 pl-12 text-sm font-bold outline-none focus:border-indigo-500 transition-all shadow-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <input type="text" placeholder="Buscar..." className="w-full bg-white border-2 border-slate-100 rounded-[22px] py-4 pl-12 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
             <div className="space-y-3 pb-20">
               {filteredOrders.length > 0 ? filteredOrders.map(order => (
@@ -378,7 +391,7 @@ export default function App() {
               <input 
                 autoFocus
                 className="w-full bg-slate-50 p-4 pl-12 rounded-2xl outline-none font-black text-sm uppercase shadow-inner border border-transparent focus:border-indigo-200" 
-                placeholder="N° PEDIDO, CTA O NOMBRE..." 
+                placeholder="DATOS..." 
                 value={globalSearchTerm} 
                 onChange={e => setGlobalSearchTerm(e.target.value)} 
               />
@@ -391,12 +404,10 @@ export default function App() {
                   className="w-full text-left bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between group active:scale-95 transition-all"
                 >
                   <div className="flex-1">
-                    <p className="text-[10px] font-black text-slate-400 uppercase leading-none">PEDIDO #{o.orderNumber}</p>
+                    <p className="text-[10px] font-black text-slate-400 uppercase leading-none">#{o.orderNumber}</p>
                     <p className="font-black text-slate-800 uppercase italic truncate mt-1">{o.customerName}</p>
                   </div>
-                  <div className="bg-white p-2 rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                    <ChevronRight size={16} />
-                  </div>
+                  <ChevronRight size={16} className="text-indigo-600" />
                 </button>
               )) : globalSearchTerm.trim() && <p className="text-center text-[10px] font-black text-slate-300 uppercase py-4">Sin coincidencias</p>}
             </div>
@@ -425,25 +436,24 @@ export default function App() {
         />
       )}
 
-      {/* BARRA INFERIOR */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-14 flex justify-around items-center max-w-md mx-auto rounded-t-[28px] shadow-[0_-8px_25px_-5px_rgba(0,0,0,0.1)] z-[1500]">
         <button onClick={() => { setView('DASHBOARD'); setIsNewOrderModalOpen(true); }} className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all">
           <div className="w-8 h-8 bg-slate-900 text-white rounded-lg flex items-center justify-center shadow-md mb-0.5">
             <Plus size={18} strokeWidth={3} />
           </div>
-          <span className="text-[8px] font-black uppercase tracking-tight text-slate-500 group-hover:text-slate-900">NUEVA</span>
+          <span className="text-[8px] font-black uppercase tracking-tight text-slate-500">NUEVA</span>
         </button>
         <button onClick={() => setView('DASHBOARD')} className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all">
-          <div className={`p-1.5 transition-colors ${view === 'DASHBOARD' ? 'text-orange-500' : 'text-slate-300'}`}>
-            <LayoutDashboard size={24} strokeWidth={2.5} />
+          <div className={`p-1.5 ${view === 'DASHBOARD' ? 'text-orange-500' : 'text-slate-300'}`}>
+            <LayoutDashboard size={24} />
           </div>
           <span className={`text-[8px] font-black uppercase tracking-tight ${view === 'DASHBOARD' ? 'text-orange-600' : 'text-slate-400'}`}>ETAPAS</span>
         </button>
         <button onClick={() => setIsGlobalSearchOpen(true)} className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all">
-          <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center border border-indigo-100 shadow-inner mb-0.5">
+          <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center border border-indigo-100 mb-0.5">
             <Search size={18} strokeWidth={3} />
           </div>
-          <span className="text-[8px] font-black uppercase tracking-tight text-slate-500 group-hover:text-indigo-600">BUSCAR</span>
+          <span className="text-[8px] font-black uppercase tracking-tight text-slate-500">BUSCAR</span>
         </button>
       </nav>
     </div>
