@@ -152,6 +152,7 @@ export default function App() {
         package_quantity: updatedOrder.packageQuantity,
         dispatch_type: updatedOrder.dispatchType,
         dispatch_value: updatedOrder.dispatchValue,
+        // Fix: Property 'detailed_packaging' does not exist on type 'Order'. Use 'detailedPackaging'.
         detailed_packaging: updatedOrder.detailedPackaging,
         customer_name: updatedOrder.customerName,
         customer_number: updatedOrder.customerNumber,
@@ -378,32 +379,42 @@ export default function App() {
         />
       )}
 
-      {/* STYLIZED BOTTOM NAVIGATION - REDUCED HEIGHT & INTERNAL LABELS */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-14 flex justify-between items-center max-w-md mx-auto rounded-t-[28px] shadow-[0_-8px_25px_-5px_rgba(0,0,0,0.1)] z-[1500] px-4">
+      {/* STYLIZED BOTTOM NAVIGATION - TRIPLE BUTTON VERTICAL LAYOUT */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-14 flex justify-around items-center max-w-md mx-auto rounded-t-[28px] shadow-[0_-8px_25px_-5px_rgba(0,0,0,0.1)] z-[1500]">
         
-        {/* Left: New Order - Icon Left, Label Right */}
+        {/* Left: Nueva Carga */}
         <button 
           onClick={() => setIsNewOrderModalOpen(true)}
-          className="flex items-center gap-2 group p-2 hover:bg-slate-50 rounded-2xl transition-all active:scale-95"
+          className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
         >
-          <div className="w-10 h-10 bg-slate-900 text-white rounded-[14px] flex items-center justify-center shadow-md border-2 border-white group-hover:bg-black shrink-0 transition-colors">
-            <Plus size={20} strokeWidth={3} />
+          <div className="w-8 h-8 bg-slate-900 text-white rounded-lg flex items-center justify-center shadow-md mb-0.5">
+            <Plus size={18} strokeWidth={3} />
           </div>
-          <span className="text-[7px] font-black uppercase tracking-tight text-slate-400 group-hover:text-slate-900 transition-colors">NUEVA CARGA</span>
+          <span className="text-[8px] font-black uppercase tracking-tight text-slate-500 group-hover:text-slate-900">NUEVA</span>
         </button>
 
-        <div className="h-6 w-px bg-slate-100 mx-2" />
+        {/* Center: ETAPAS Dashboard */}
+        <button 
+          onClick={() => setView('DASHBOARD')}
+          className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
+        >
+          <div className={`p-1.5 transition-colors ${view === 'DASHBOARD' ? 'text-orange-500' : 'text-slate-300'}`}>
+            <LayoutDashboard size={24} strokeWidth={2.5} />
+          </div>
+          <span className={`text-[8px] font-black uppercase tracking-tight ${view === 'DASHBOARD' ? 'text-orange-600' : 'text-slate-400'}`}>ETAPAS</span>
+        </button>
 
-        {/* Right: Search - Label Left, Icon Right */}
+        {/* Right: Buscar Pedido */}
         <button 
           onClick={() => setIsGlobalSearchOpen(true)}
-          className="flex items-center flex-row-reverse gap-2 group p-2 hover:bg-indigo-50 rounded-2xl transition-all active:scale-95"
+          className="flex flex-col items-center justify-center gap-0.5 w-20 group active:scale-90 transition-all"
         >
-          <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-[14px] flex items-center justify-center shadow-inner border-2 border-transparent group-hover:border-indigo-100 shrink-0 transition-all">
-            <Search size={20} strokeWidth={3} />
+          <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center border border-indigo-100 shadow-inner mb-0.5">
+            <Search size={18} strokeWidth={3} />
           </div>
-          <span className="text-[7px] font-black uppercase tracking-tight text-slate-400 group-hover:text-indigo-600 transition-colors">BUSCAR PEDIDO</span>
+          <span className="text-[8px] font-black uppercase tracking-tight text-slate-500 group-hover:text-indigo-600">BUSCAR</span>
         </button>
+        
       </nav>
     </div>
   );
