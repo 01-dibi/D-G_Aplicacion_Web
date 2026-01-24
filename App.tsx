@@ -59,10 +59,10 @@ export default function App() {
         source: o.source,
         carrier: o.carrier,
         warehouse: o.warehouse,
-        packageType: o.package_type,
-        packageQuantity: o.package_quantity || 0,
-        dispatchType: o.dispatch_type,
-        dispatchValue: o.dispatch_value,
+        package_type: o.packageType,
+        package_quantity: o.packageQuantity || 0,
+        dispatch_type: o.dispatchType,
+        dispatch_value: o.dispatchValue,
         detailedPackaging: o.detailed_packaging || [],
         createdAt: o.created_at,
         deliveryData: o.delivery_data
@@ -378,31 +378,31 @@ export default function App() {
         />
       )}
 
-      {/* Redesigned Bottom Navigation: Two distributed icons - Sleeker/Smaller */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t px-12 h-16 flex justify-between items-center max-w-md mx-auto rounded-t-[30px] shadow-[0_-10px_30px_-5px_rgba(0,0,0,0.1)] z-[1500]">
+      {/* STYLIZED BOTTOM NAVIGATION - REDUCED HEIGHT & INTERNAL LABELS */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-14 flex justify-between items-center max-w-md mx-auto rounded-t-[28px] shadow-[0_-8px_25px_-5px_rgba(0,0,0,0.1)] z-[1500] px-4">
         
-        {/* Left: New Order (+) */}
+        {/* Left: New Order - Icon Left, Label Right */}
         <button 
           onClick={() => setIsNewOrderModalOpen(true)}
-          className="flex flex-col items-center gap-1 group py-1"
+          className="flex items-center gap-2 group p-2 hover:bg-slate-50 rounded-2xl transition-all active:scale-95"
         >
-          <div className="w-10 h-10 bg-slate-900 text-white rounded-[14px] flex items-center justify-center shadow-md active:scale-90 transition-all border-2 border-white group-hover:bg-black">
+          <div className="w-10 h-10 bg-slate-900 text-white rounded-[14px] flex items-center justify-center shadow-md border-2 border-white group-hover:bg-black shrink-0 transition-colors">
             <Plus size={20} strokeWidth={3} />
           </div>
-          <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400">NUEVA CARGA</span>
+          <span className="text-[7px] font-black uppercase tracking-tight text-slate-400 group-hover:text-slate-900 transition-colors">NUEVA CARGA</span>
         </button>
 
-        <div className="h-6 w-px bg-slate-100" />
+        <div className="h-6 w-px bg-slate-100 mx-2" />
 
-        {/* Right: Search (Lupa) */}
+        {/* Right: Search - Label Left, Icon Right */}
         <button 
           onClick={() => setIsGlobalSearchOpen(true)}
-          className="flex flex-col items-center gap-1 group py-1"
+          className="flex items-center flex-row-reverse gap-2 group p-2 hover:bg-indigo-50 rounded-2xl transition-all active:scale-95"
         >
-          <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-[14px] flex items-center justify-center shadow-inner active:scale-90 transition-all border-2 border-transparent group-hover:border-indigo-100">
+          <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-[14px] flex items-center justify-center shadow-inner border-2 border-transparent group-hover:border-indigo-100 shrink-0 transition-all">
             <Search size={20} strokeWidth={3} />
           </div>
-          <span className="text-[7px] font-black uppercase tracking-tighter text-slate-400">BUSCAR PEDIDO</span>
+          <span className="text-[7px] font-black uppercase tracking-tight text-slate-400 group-hover:text-indigo-600 transition-colors">BUSCAR PEDIDO</span>
         </button>
       </nav>
     </div>
