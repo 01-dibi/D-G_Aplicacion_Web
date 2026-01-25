@@ -175,6 +175,7 @@ export default function App() {
       if (error) throw error;
       
       setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      // Actualizamos el pedido seleccionado para que el modal refleje los cambios si sigue abierto
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {

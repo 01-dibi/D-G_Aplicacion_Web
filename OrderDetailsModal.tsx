@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon
 } from 'lucide-react';
@@ -47,6 +47,18 @@ export default function OrderDetailsModal({
   const totalConfirmedQuantity = useMemo(() => {
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
+
+  // Sincronizar cambios de bultos inmediatamente con la base de datos
+  const persistChanges = async (entries: PackagingEntry[]) => {
+    const totalQty = entries.reduce((sum, entry) => sum + entry.quantity, 0);
+    const updatedOrder: Order = {
+      ...order,
+      detailedPackaging: entries,
+      packageQuantity: totalQty,
+      reviewer: order.reviewer || currentUserName || 'SISTEMA'
+    };
+    await onUpdate(updatedOrder);
+  };
 
   const handleLinkOrder = () => {
     const num = linkOrderInput.trim();
@@ -109,7 +121,7 @@ export default function OrderDetailsModal({
           dispatchType: dispatchTypeSelection,
           dispatchValue: finalDispatchValue,
           reviewer: autoReviewer,
-          packageQuantity: lo.packageQuantity || 0 // Mantener lo que ya tenía o vincular si es necesario
+          packageQuantity: lo.packageQuantity || 0
         });
       }
       onClose();
@@ -180,7 +192,7 @@ export default function OrderDetailsModal({
               <div className="bg-slate-900 text-white px-3 py-2 rounded-2xl shadow-xl flex items-center gap-2 border border-white/10 min-w-[100px] max-w-[140px] justify-center overflow-hidden">
                 <Users size={11} className="text-orange-500 flex-shrink-0" />
                 <span className="text-[9px] font-black uppercase tracking-tight truncate">
-                  {order.reviewer || (order.status === OrderStatus.PENDING ? `OP: ${currentUserName || 'S/N'}` : 'SIN ASIGNAR')}
+                  {order.reviewer || (order.status === OrderStatus.PENDING ? `${currentUserName || 'S/N'}` : 'SIN ASIGNAR')}
                 </span>
               </div>
               {!isReadOnly && (
@@ -260,7 +272,15 @@ export default function OrderDetailsModal({
 
           {!isReadOnly && (
             <button 
-              onClick={() => { if (currentQty <= 0) return; setConfirmedEntries([...confirmedEntries, { id: Date.now().toString(), deposit: warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection, type: packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection, quantity: currentQty }]); setCurrentQty(0); }} 
+              onClick={async () => { 
+                if (currentQty <= 0) return; 
+                const newEntry: PackagingEntry = { id: Date.now().toString(), deposit: warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection, type: packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection, quantity: currentQty };
+                const newEntries = [...confirmedEntries, newEntry];
+                setConfirmedEntries(newEntries); 
+                setCurrentQty(0);
+                // Guardado inmediato para persistencia si se cierra con X
+                await persistChanges(newEntries);
+              }} 
               className={`${actionButtonClass} bg-slate-900 text-white border-slate-700 hover:bg-black`}
             >
               <Plus size={16} strokeWidth={4}/> CONFIRMAR CARGA
@@ -272,7 +292,21 @@ export default function OrderDetailsModal({
               {confirmedEntries.map(e => (
                 <div key={e.id} className="flex items-center justify-between bg-white border-2 border-slate-50 p-2.5 rounded-2xl shadow-sm">
                   <div><p className="text-[8px] font-black text-indigo-500 uppercase italic leading-none">{e.deposit}</p><p className="text-[10px] font-black text-slate-800 uppercase mt-1 tracking-tight">{e.type}</p></div>
-                  <div className="flex items-center gap-3"><span className="bg-slate-100 px-3 py-1.5 rounded-lg text-xs font-black text-slate-900">{e.quantity}</span>{!isReadOnly && <button onClick={() => setConfirmedEntries(confirmedEntries.filter(x => x.id !== e.id))} className="text-red-400 p-1.5 active:scale-90"><Trash size={16}/></button>}</div>
+                  <div className="flex items-center gap-3">
+                    <span className="bg-slate-100 px-3 py-1.5 rounded-lg text-xs font-black text-slate-900">{e.quantity}</span>
+                    {!isReadOnly && (
+                      <button 
+                        onClick={async () => {
+                          const newEntries = confirmedEntries.filter(x => x.id !== e.id);
+                          setConfirmedEntries(newEntries);
+                          await persistChanges(newEntries);
+                        }} 
+                        className="text-red-400 p-1.5 active:scale-90"
+                      >
+                        <Trash size={16}/>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

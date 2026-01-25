@@ -112,7 +112,9 @@ export function OrderCard({ order, onClick, isSelectionMode, isSelected }: any) 
         <div className="space-y-3">
           <div className="space-y-1">
             <p className="text-[7px] font-black uppercase tracking-widest opacity-30 leading-none">Responsable:</p>
-            <p className="text-[10px] font-black text-slate-700 uppercase leading-none truncate">{order.reviewer || 'Pte.'}</p>
+            <p className="text-[11px] font-black text-slate-900 uppercase leading-none truncate bg-slate-100 p-1.5 rounded-lg border border-slate-200">
+              {order.reviewer || 'Pte.'}
+            </p>
           </div>
           <div className="space-y-1">
             <p className="text-[7px] font-black uppercase tracking-widest opacity-30 leading-none">Despacho:</p>
