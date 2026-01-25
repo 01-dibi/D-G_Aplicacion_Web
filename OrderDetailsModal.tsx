@@ -49,6 +49,7 @@ export default function OrderDetailsModal({
   }, [confirmedEntries]);
 
   // Sincronizar cambios de bultos inmediatamente con la base de datos
+  // Esto asegura que la etiqueta (OrderCard) refleje los bultos aunque se cierre con X
   const persistChanges = async (entries: PackagingEntry[]) => {
     const totalQty = entries.reduce((sum, entry) => sum + entry.quantity, 0);
     const updatedOrder: Order = {

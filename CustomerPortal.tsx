@@ -6,13 +6,11 @@ import { OrderStatus } from './types.ts';
 export default function CustomerPortal({ onBack, orders }: any) {
   const [s, setS] = useState('');
   
-  // Lógica de búsqueda mejorada: Incluye N° Cliente e Historial (ARCHIVED)
-  // IMPORTANTE: Solo muestra resultados si hay texto en la búsqueda.
+  // Lógica de búsqueda RESTRINGIDA: Solo por Número de Cliente
   const results = s.trim().length > 0 
     ? orders?.filter((o: any) => 
-        (o.customerName?.toLowerCase().includes(s.toLowerCase()) || 
-         o.orderNumber?.toString().includes(s) || 
-         o.customerNumber?.toString().includes(s))
+        o.customerNumber?.toString().toLowerCase() === s.toLowerCase() ||
+        o.customerNumber?.toString().includes(s)
       ) || [] 
     : [];
   
@@ -31,19 +29,24 @@ export default function CustomerPortal({ onBack, orders }: any) {
         >
           <ArrowLeft className="text-slate-900" />
         </button>
-        <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900">Consulta de Pedido</h2>
+        <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900">Consulta Clientes</h2>
       </header>
 
       <div className="bg-white p-8 rounded-[40px] shadow-xl space-y-6 border border-slate-100">
         <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/>
           <input 
+            type="text"
+            inputMode="numeric"
             className="w-full bg-slate-50 p-5 pl-12 rounded-[22px] outline-none font-black text-sm uppercase shadow-inner border border-transparent focus:border-indigo-100 transition-all" 
-            placeholder="NOMBRE, N° PEDIDO O N° CTA" 
+            placeholder="INGRESE SU N° DE CLIENTE..." 
             value={s} 
             onChange={e=>setS(e.target.value)} 
           />
         </div>
+        <p className="text-[9px] font-black text-slate-400 uppercase text-center italic tracking-widest">
+          Consulte el estado cronológico de sus pedidos ingresando su cuenta.
+        </p>
       </div>
 
       <div className="space-y-6">
@@ -62,7 +65,6 @@ export default function CustomerPortal({ onBack, orders }: any) {
               <span>{o.locality}</span>
             </div>
             
-            {/* LÍNEA DE TIEMPO DE 4 ETAPAS CRONOLÓGICAS */}
             <div className="flex justify-between items-center relative px-1">
                {[OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED].map((st, idx) => {
                  const statusOrder = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
@@ -89,12 +91,12 @@ export default function CustomerPortal({ onBack, orders }: any) {
         )) : s.trim().length > 0 ? (
           <div className="text-center py-20 opacity-30">
             <Search size={48} className="mx-auto mb-4" />
-            <p className="font-black uppercase text-[10px] tracking-widest text-slate-800">No se encontraron resultados</p>
+            <p className="font-black uppercase text-[10px] tracking-widest text-slate-800">No se encontraron pedidos para este cliente</p>
           </div>
         ) : (
           <div className="text-center py-20 opacity-20">
             <Package size={60} className="mx-auto mb-4" />
-            <p className="font-black uppercase text-[10px] tracking-widest leading-relaxed text-slate-800">Realiza una búsqueda para<br/>ver tus pedidos</p>
+            <p className="font-black uppercase text-[10px] tracking-widest leading-relaxed text-slate-800">Ingrese su número de cuenta para<br/>ver el historial de pedidos</p>
           </div>
         )}
       </div>
