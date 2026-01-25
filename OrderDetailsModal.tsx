@@ -20,14 +20,12 @@ export default function OrderDetailsModal({
 }: OrderDetailsModalProps) {
   const isReadOnly = order.status === OrderStatus.ARCHIVED;
   
-  // Estados de la UI
   const [isAddingCollaborator, setIsAddingCollaborator] = useState(false);
   const [newCollabInput, setNewCollabInput] = useState('');
   const [isLinkingOrder, setIsLinkingOrder] = useState(false);
   const [linkOrderInput, setLinkOrderInput] = useState('');
   const [linkedOrders, setLinkedOrders] = useState<Order[]>([order]);
 
-  // Configuración de opciones
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
   const packageTypes = ["CAJA", "BOLSA:", "PAQUETE", "BOBINA", "OTROS:"];
   const dispatchMainTypes = ["VIAJANTES", "VENDEDORES", "TRANSPORTE", "RETIRO PERSONAL"];
@@ -36,7 +34,6 @@ export default function OrderDetailsModal({
     "VENDEDORES": ["MAURO", "GUSTAVO"]
   };
 
-  // Estados del formulario
   const [warehouseSelection, setWarehouseSelection] = useState(order.warehouse ? (warehouses.includes(order.warehouse) ? order.warehouse : 'Otros:') : warehouses[0]);
   const [customWarehouseText, setCustomWarehouseText] = useState(!warehouses.includes(order.warehouse || '') ? (order.warehouse || '') : '');
   const [packageTypeSelection, setPackageTypeSelection] = useState(order.packageType ? (packageTypes.includes(order.packageType) ? order.packageType : 'OTROS:') : packageTypes[0]);
@@ -48,12 +45,8 @@ export default function OrderDetailsModal({
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
 
   const totalConfirmedQuantity = useMemo(() => {
-    const currentModalTotal = confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
-    const otherLinkedTotal = linkedOrders
-      .filter(lo => lo.id !== order.id)
-      .reduce((sum, lo) => sum + (lo.packageQuantity || 0), 0);
-    return currentModalTotal + otherLinkedTotal;
-  }, [confirmedEntries, linkedOrders, order.id]);
+    return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
+  }, [confirmedEntries]);
 
   const handleLinkOrder = () => {
     const num = linkOrderInput.trim();
@@ -75,21 +68,24 @@ export default function OrderDetailsModal({
 
   const handleConfirmStage = async () => {
     if (isSaving || isReadOnly) return;
+    
     let nextStatus: OrderStatus = order.status;
     let autoReviewer = order.reviewer || currentUserName || 'SISTEMA';
 
     if (order.status === OrderStatus.PENDING) {
       nextStatus = OrderStatus.COMPLETED;
-      // ASIGNACIÓN AUTOMÁTICA AL PASAR A PREPARADO
-      autoReviewer = currentUserName || 'SISTEMA';
+    } else if (order.status === OrderStatus.COMPLETED) {
+      nextStatus = OrderStatus.DISPATCHED;
+    } else if (order.status === OrderStatus.DISPATCHED) {
+      nextStatus = OrderStatus.ARCHIVED;
     }
-    else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
-    else if (order.status === OrderStatus.DISPATCHED) nextStatus = OrderStatus.ARCHIVED;
 
     const finalWarehouse = warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection;
     const finalPackageType = packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection;
     const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
     const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
+
+    const totalQty = confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
 
     const updatedMainOrder: Order = {
       ...order,
@@ -97,7 +93,7 @@ export default function OrderDetailsModal({
       reviewer: autoReviewer,
       warehouse: finalWarehouse,
       packageType: finalPackageType,
-      packageQuantity: confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0),
+      packageQuantity: totalQty,
       detailedPackaging: confirmedEntries,
       dispatchType: dispatchTypeSelection,
       dispatchValue: finalDispatchValue
@@ -112,7 +108,8 @@ export default function OrderDetailsModal({
           status: nextStatus,
           dispatchType: dispatchTypeSelection,
           dispatchValue: finalDispatchValue,
-          reviewer: autoReviewer
+          reviewer: autoReviewer,
+          packageQuantity: lo.packageQuantity || 0 // Mantener lo que ya tenía o vincular si es necesario
         });
       }
       onClose();
@@ -147,7 +144,6 @@ export default function OrderDetailsModal({
         </button>
 
         <div className="pt-8 space-y-5">
-          {/* HEADER ROW CON ASIGNACIÓN AUTOMÁTICA */}
           <div className="flex items-center justify-start gap-2.5 px-0.5">
             <div className="flex items-center gap-1.5 shrink-0">
               {!isReadOnly && (

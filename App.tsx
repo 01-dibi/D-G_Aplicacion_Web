@@ -26,7 +26,6 @@ export default function App() {
   const [isNewOrderModalOpen, setIsNewOrderModalOpen] = useState(false);
   const [isLocalMode, setIsLocalMode] = useState(false);
   
-  // Estado para selección múltiple
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   
@@ -133,7 +132,6 @@ export default function App() {
     );
   }, [orders, view, searchTerm]);
 
-  // Lógica de Búsqueda Global (Universal)
   const globalFilteredOrders = useMemo(() => {
     if (!globalSearchTerm.trim()) return [];
     const lowSearch = globalSearchTerm.toLowerCase();
@@ -164,23 +162,24 @@ export default function App() {
         warehouse: updatedOrder.warehouse,
         package_type: updatedOrder.packageType,
         package_quantity: updatedOrder.packageQuantity,
-        dispatch_type: updatedOrder.dispatchType,
-        dispatch_value: updatedOrder.dispatchValue,
         detailed_packaging: updatedOrder.detailedPackaging,
         customer_name: updatedOrder.customerName,
         customer_number: updatedOrder.customerNumber,
         locality: updatedOrder.locality,
         order_number: updatedOrder.orderNumber,
-        reviewer: updatedOrder.reviewer
+        reviewer: updatedOrder.reviewer,
+        dispatch_type: updatedOrder.dispatchType,
+        dispatch_value: updatedOrder.dispatchValue
       }).eq('id', updatedOrder.id);
       
       if (error) throw error;
+      
+      setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
-      const newOrders = orders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
-      saveLocalOrders(newOrders);
-      return true;
+      console.error("Update error:", err);
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -188,6 +187,8 @@ export default function App() {
 
   const handleCreateOrder = async (newOrder: Partial<Order>) => {
     setIsSaving(true);
+    const reviewerName = currentUser?.name || 'SISTEMA';
+    
     if (isLocalMode || currentUser?.mode === 'local') {
       const orderToAdd: Order = {
         id: Math.random().toString(36).substr(2, 9),
@@ -198,6 +199,7 @@ export default function App() {
         notes: newOrder.notes || '',
         status: OrderStatus.PENDING,
         source: newOrder.source || 'Manual',
+        reviewer: reviewerName,
         createdAt: new Date().toISOString()
       };
       saveLocalOrders([orderToAdd, ...orders]);
@@ -213,12 +215,14 @@ export default function App() {
         locality: newOrder.locality,
         notes: newOrder.notes,
         status: OrderStatus.PENDING,
+        reviewer: reviewerName,
         source: newOrder.source || 'Manual'
       }]);
       if (error) throw error;
-      fetchOrders();
+      await fetchOrders();
       return true;
     } catch (err) {
+      console.error("Create error:", err);
       return false;
     } finally {
       setIsSaving(false);
@@ -347,7 +351,6 @@ export default function App() {
         )}
       </main>
 
-      {/* PANEL DE BÚSQUEDA GLOBAL FUNCIONAL */}
       {isGlobalSearchOpen && (
         <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[3000] flex flex-col p-6 animate-in fade-in duration-300">
           <header className="flex items-center gap-4 mb-8">
