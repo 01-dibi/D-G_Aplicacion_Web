@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Package, Truck, Sparkles, Hash, Users, MapPin, ChevronRight } from 'lucide-react';
+import { Package, Truck, Sparkles, Hash, Users, MapPin, ChevronRight, CheckCircle2, Circle } from 'lucide-react';
 import { OrderStatus } from './types.ts';
 
 export function StatCard({ count, label, color, icon, onClick }: any) {
@@ -26,23 +26,34 @@ export function SidebarItem({ icon, label, active, onClick, danger }: any) {
   );
 }
 
-export function NavBtn({ icon, label, active, onClick }: any) {
+export function NavBtn({ icon, label, active, onClick, activeColor, baseColor }: any) {
   return (
     <button 
       onClick={onClick} 
-      className={`flex flex-col items-center justify-center gap-1.5 transition-all flex-1 py-1 ${active ? 'text-indigo-600 scale-105' : 'text-slate-300'}`}
+      className={`flex flex-col items-center justify-center gap-1 transition-all flex-1 h-full`}
     >
-      <div className={`p-2 rounded-xl transition-all ${active ? 'bg-indigo-50 shadow-inner' : ''}`}>
-        {React.cloneElement(icon, { size: 20 })}
+      <div 
+        className={`p-3 rounded-2xl transition-all duration-300 ${
+          active 
+            ? `${activeColor} text-white shadow-md` 
+            : `bg-slate-50 ${baseColor} hover:bg-slate-100`
+        }`}
+      >
+        {React.cloneElement(icon, { 
+          size: 24, 
+          strokeWidth: active ? 3 : 2 
+        })}
       </div>
-      <span className={`text-[8px] font-black uppercase tracking-tighter text-center leading-none ${active ? 'text-indigo-600' : 'text-slate-400 opacity-60'}`}>
+      <span className={`text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${
+        active ? 'text-slate-900 opacity-100 mt-1' : 'text-slate-400 opacity-50'
+      }`}>
         {label}
       </span>
     </button>
   );
 }
 
-export function OrderCard({ order, onClick }: any) {
+export function OrderCard({ order, onClick, isSelectionMode, isSelected }: any) {
   const statusColors = {
     [OrderStatus.PENDING]: 'bg-orange-100 text-orange-600 border-orange-200',
     [OrderStatus.COMPLETED]: 'bg-emerald-100 text-emerald-600 border-emerald-200',
@@ -50,71 +61,62 @@ export function OrderCard({ order, onClick }: any) {
     [OrderStatus.ARCHIVED]: 'bg-slate-100 text-slate-500 border-slate-200'
   };
 
-  // Cálculo dinámico del total de bultos sumando el detalle acumulado
   const totalBultos = order.detailedPackaging && order.detailedPackaging.length > 0
     ? order.detailedPackaging.reduce((sum: number, entry: any) => sum + (entry.quantity || 0), 0)
     : (order.packageQuantity || 0);
 
   return (
-    <div onClick={onClick} className="bg-white rounded-[35px] border-2 border-slate-100 shadow-sm relative overflow-hidden active:scale-[0.98] transition-all flex h-auto min-h-[160px]">
-      {order.source === 'IA' && (
-        <div className="absolute top-0 left-0 bg-emerald-500 text-white text-[7px] font-black px-3 py-1.5 rounded-br-2xl uppercase tracking-[0.2em] flex items-center gap-1.5 z-10 shadow-sm">
+    <div 
+      onClick={onClick} 
+      className={`bg-white rounded-[35px] border-2 shadow-sm relative overflow-hidden active:scale-[0.98] transition-all flex h-auto min-h-[160px] ${isSelected ? 'border-indigo-500 bg-indigo-50/20' : 'border-slate-100'}`}
+    >
+      {isSelectionMode && (
+        <div className="absolute top-4 right-4 z-20">
+          {isSelected ? (
+            <CheckCircle2 size={24} className="text-indigo-600 fill-indigo-50 animate-in zoom-in duration-200" />
+          ) : (
+            <Circle size={24} className="text-slate-200" />
+          )}
+        </div>
+      )}
+
+      {order.source === 'IA' && !isSelected && (
+        <div className="absolute top-0 left-0 bg-emerald-500 text-white text-[7px] font-black px-3 py-1.5 rounded-br-2xl uppercase tracking-[0.2em] flex items-center gap-1.5 z-10">
           <Sparkles size={10}/> IA
         </div>
       )}
 
-      {/* LADO IZQUIERDO: Detalles agrandados */}
       <div className="flex-1 p-6 flex flex-col justify-between border-r border-slate-50">
         <div>
           <div className="flex items-center gap-2 mb-2 opacity-40">
-            <span className="text-[11px] font-black uppercase tracking-tighter">PEDIDO N° {order.orderNumber}</span>
+            <span className="text-[11px] font-black uppercase tracking-tighter">#{order.orderNumber}</span>
             <span className="h-3 w-px bg-slate-300"></span>
             <span className="text-[11px] font-black uppercase tracking-tighter">CTA {order.customerNumber || '---'}</span>
           </div>
-          
-          <h3 className="font-black text-slate-900 text-xl uppercase italic leading-tight mb-1">
-            {order.customerName}
-          </h3>
-          
+          <h3 className="font-black text-slate-900 text-xl uppercase italic leading-tight mb-1">{order.customerName}</h3>
           <div className="flex items-center gap-1.5 text-indigo-600 mb-4">
             <MapPin size={14} className="flex-shrink-0" />
             <span className="text-[12px] font-black uppercase italic tracking-tight">{order.locality}</span>
           </div>
         </div>
-
         <div className="bg-slate-50 self-start px-4 py-2 rounded-2xl flex items-center gap-2">
           <Package size={16} className="text-slate-400" />
-          <span className="text-sm font-black text-slate-700">{totalBultos} <span className="text-[10px] text-slate-400 uppercase ml-1">Bultos Totales</span></span>
+          <span className="text-sm font-black text-slate-700">{totalBultos} <span className="text-[10px] text-slate-400 uppercase ml-1">Bultos</span></span>
         </div>
       </div>
 
-      {/* LADO DERECHO: Etapa y Responsables */}
       <div className="w-[35%] bg-slate-50/50 p-6 flex flex-col gap-4">
-        <div className={`text-[9px] font-black px-3 py-2 rounded-xl uppercase tracking-widest text-center border ${statusColors[order.status as OrderStatus] || statusColors[OrderStatus.ARCHIVED]}`}>
+        <div className={`text-[8px] font-black px-3 py-2 rounded-xl uppercase tracking-widest text-center border ${statusColors[order.status as OrderStatus] || statusColors[OrderStatus.ARCHIVED]}`}>
           {order.status}
         </div>
-
         <div className="space-y-3">
-          {/* Responsables Preparado */}
           <div className="space-y-1">
-            <div className="flex items-center gap-1.5 opacity-30">
-              <Users size={10} />
-              <span className="text-[7px] font-black uppercase tracking-widest">Preparado por:</span>
-            </div>
-            <p className="text-[10px] font-black text-slate-700 uppercase leading-none truncate">
-              {order.reviewer || 'Pte. Asignar'}
-            </p>
+            <p className="text-[7px] font-black uppercase tracking-widest opacity-30 leading-none">Responsable:</p>
+            <p className="text-[10px] font-black text-slate-700 uppercase leading-none truncate">{order.reviewer || 'Pte.'}</p>
           </div>
-
-          {/* Responsable Despacho */}
           <div className="space-y-1">
-            <div className="flex items-center gap-1.5 opacity-30">
-              <Truck size={10} />
-              <span className="text-[7px] font-black uppercase tracking-widest">Despacho por:</span>
-            </div>
-            <p className="text-[10px] font-black text-indigo-600 uppercase leading-none truncate">
-              {order.dispatchValue || order.carrier || 'Pte. Despacho'}
-            </p>
+            <p className="text-[7px] font-black uppercase tracking-widest opacity-30 leading-none">Despacho:</p>
+            <p className="text-[10px] font-black text-indigo-600 uppercase leading-none truncate">{order.dispatchValue || 'Pte.'}</p>
           </div>
         </div>
       </div>

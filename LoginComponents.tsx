@@ -27,6 +27,10 @@ export function LoginModal({ onLogin, onBack }: any) {
   const [showReset, setShowReset] = useState(false);
 
   const handleCloudLogin = async () => {
+    if (!username.trim()) {
+      setError('Escribe un nombre de usuario');
+      return;
+    }
     if (!password.trim()) {
       setError('Escribe una clave para la nube');
       return;
@@ -63,19 +67,14 @@ export function LoginModal({ onLogin, onBack }: any) {
       }
     } catch (err: any) {
       console.error("Cloud error:", err);
-      const proceed = confirm("Fallo de conexión con Supabase (RLS o Red).\n\n¿Quieres usar el ACCESO DE EMERGENCIA local?");
-      if (proceed) {
-        onLogin({ name: username.toUpperCase() || 'ADMIN', mode: 'local' });
-      } else {
-        setError("Error de Nube: Verifica tus tablas y RLS en Supabase.");
-      }
+      setError("Error de Nube: Verifica la conexión o permisos.");
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleResetPassword = async () => {
-    if (!confirm(`¿Estás seguro de blanquear la clave para ${username}? \n\nEsto borrará tu usuario de la nube para que puedas elegir una clave nueva.`)) return;
+    if (!confirm(`¿Estás seguro de blanquear la clave para ${username}? \n\nEsto borrará tu registro para que puedas elegir una clave nueva.`)) return;
     
     setIsLoading(true);
     try {
@@ -86,23 +85,15 @@ export function LoginModal({ onLogin, onBack }: any) {
       
       if (delError) throw delError;
       
-      alert("Clave blanqueada con éxito. Ahora ingresa tu nueva clave y dale a LOGUEAR Y SINCRONIZAR.");
+      alert("Clave blanqueada con éxito. Ahora ingresa tu nueva clave y dale a LOGUEAR Y ACTUALIZAR.");
       setError('');
       setShowReset(false);
       setPassword('');
     } catch (err: any) {
-      alert("No se pudo blanquear automáticamente (Posible falta de permisos RLS). \n\nPor favor, usa el Acceso de Emergencia azul.");
+      alert("No se pudo blanquear automáticamente. Contacta al administrador.");
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleDirectAccess = () => {
-    setError('');
-    setIsLoading(true);
-    setTimeout(() => {
-      onLogin({ name: username.toUpperCase() || 'ADMIN', mode: 'local' });
-    }, 400);
   };
 
   return (
@@ -124,7 +115,7 @@ export function LoginModal({ onLogin, onBack }: any) {
           <h1 className="text-3xl font-black italic text-slate-800 mb-1 uppercase tracking-tighter">
             Control D&G
           </h1>
-          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none">Blanqueo de Claves v3.1</p>
+          <p className="text-[9px] font-black uppercase text-slate-400 tracking-widest leading-none">Acceso Centralizado v4.0</p>
         </div>
 
         <div className="space-y-4 text-left">
@@ -137,6 +128,20 @@ export function LoginModal({ onLogin, onBack }: any) {
                 placeholder="ADMIN" 
                 value={username} 
                 onChange={e => setUsername(e.target.value)} 
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[8px] font-black text-slate-400 uppercase ml-4">Nueva Clave o Actual</label>
+            <div className="relative">
+              <KeyRound className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+              <input 
+                type="password"
+                className="w-full bg-slate-50 p-5 pl-14 rounded-[24px] font-black text-sm outline-none border-2 border-transparent focus:border-indigo-500 uppercase shadow-inner" 
+                placeholder="••••••••" 
+                value={password} 
+                onChange={e => setPassword(e.target.value)} 
               />
             </div>
           </div>
@@ -157,44 +162,20 @@ export function LoginModal({ onLogin, onBack }: any) {
           </div>
         )}
 
-        <div className="space-y-4 pt-2">
-          {/* ACCESO DE EMERGENCIA */}
+        <div className="pt-2">
           <button 
-            onClick={handleDirectAccess}
-            className="w-full bg-indigo-600 text-white py-7 rounded-[30px] font-black uppercase text-[11px] flex flex-col items-center justify-center gap-1 shadow-[0_20px_40px_-10px_rgba(79,70,229,0.4)] active:scale-95 transition-all border-b-4 border-indigo-800"
+            onClick={handleCloudLogin} 
+            disabled={isLoading}
+            className="w-full bg-indigo-600 text-white py-6 rounded-[30px] font-black uppercase text-[11px] flex flex-col items-center justify-center gap-1 shadow-[0_20px_40px_-10px_rgba(79,70,229,0.4)] active:scale-95 transition-all border-b-4 border-indigo-800 disabled:opacity-50"
           >
             <div className="flex items-center gap-2">
-               {isLoading ? <Loader2 className="animate-spin" size={18}/> : <Zap size={18} className="fill-white"/>}
-               <span>ACCESO DE EMERGENCIA</span>
+               {isLoading ? <Loader2 className="animate-spin" size={18}/> : <Database size={18} className="fill-white"/>}
+               <span>LOGUEAR Y ACTUALIZAR CLAVE</span>
             </div>
-            <span className="text-[7px] opacity-60">SIN CLAVE - MODO LOCAL</span>
           </button>
-
-          <div className="relative py-2">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
-            <div className="relative flex justify-center text-[8px]"><span className="bg-white px-2 text-slate-300 font-black uppercase tracking-widest">Sincronización Nube</span></div>
-          </div>
-
-          <div className="space-y-3">
-             <input 
-                type="password"
-                className="w-full bg-slate-50 p-4 rounded-[20px] font-black text-xs outline-none border border-slate-100 uppercase text-center" 
-                placeholder="NUEVA CLAVE O ACTUAL" 
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-              />
-              <button 
-                onClick={handleCloudLogin} 
-                disabled={isLoading}
-                className="w-full bg-slate-100 text-slate-500 py-4 rounded-[20px] font-black uppercase text-[9px] flex items-center justify-center gap-2 hover:bg-slate-200 transition-all disabled:opacity-50"
-              >
-                {isLoading ? <Loader2 className="animate-spin" size={14}/> : <Database size={14}/>}
-                LOGUEAR Y ACTUALIZAR CLAVE
-              </button>
-          </div>
         </div>
 
-        <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">D&G Logística - Soporte Total</p>
+        <p className="text-[8px] font-bold text-slate-300 uppercase tracking-widest">D&G Logística - Gestión en la Nube</p>
       </div>
     </div>
   );
