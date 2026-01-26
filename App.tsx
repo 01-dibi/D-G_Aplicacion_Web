@@ -45,6 +45,7 @@ export default function App() {
 
   const fetchOrders = async () => {
     setIsLoading(true);
+    // Solo usamos local si hay un usuario en modo local explícito
     if (currentUser?.mode === 'local') {
       const local = localStorage.getItem('dg_local_orders');
       if (local) setOrders(JSON.parse(local));
@@ -92,22 +93,22 @@ export default function App() {
     }
   };
 
+  // Efecto para manejar la carga de datos inicial y real-time
   useEffect(() => {
-    if (!currentUser) {
-      setIsLoading(false);
-      return;
+    // Cargamos pedidos si el usuario está logueado O si estamos en modo consulta de clientes
+    if (currentUser || isCustomerMode) {
+      fetchOrders();
+      setIsLandingMode(false);
     }
-    setIsLandingMode(false);
-    fetchOrders();
 
-    if (currentUser.mode !== 'local' && !isLocalMode) {
+    if (!isLocalMode && (currentUser || isCustomerMode)) {
       const channel = supabase
         .channel('realtime_orders')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
         .subscribe();
       return () => { supabase.removeChannel(channel); };
     }
-  }, [currentUser]);
+  }, [currentUser, isCustomerMode]);
 
   const stats = useMemo(() => ({
     pending: orders.filter(o => o.status === OrderStatus.PENDING).length,
@@ -162,6 +163,7 @@ export default function App() {
         warehouse: updatedOrder.warehouse,
         package_type: updatedOrder.packageType,
         package_quantity: updatedOrder.packageQuantity,
+        // Fix: Use camelCase properties from the Order interface (detailedPackaging, dispatchType, dispatchValue)
         detailed_packaging: updatedOrder.detailedPackaging,
         customer_name: updatedOrder.customerName,
         customer_number: updatedOrder.customerNumber,
@@ -175,7 +177,6 @@ export default function App() {
       if (error) throw error;
       
       setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-      // Actualizamos el pedido seleccionado para que el modal refleje los cambios si sigue abierto
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
@@ -261,7 +262,7 @@ export default function App() {
     }
   };
 
-  if (isLandingMode) return <LandingScreen onSelectStaff={() => setIsLandingMode(false)} onSelectCustomer={() => { setIsLandingMode(false); setIsCustomerMode(true); }} />;
+  if (isLandingMode) return <LandingScreen onSelectStaff={() => setIsLandingMode(false)} onSelectCustomer={() => { setIsCustomerMode(true); setIsLandingMode(false); }} />;
   if (isCustomerMode) return <CustomerPortal onBack={() => { setIsLandingMode(true); setIsCustomerMode(false); }} orders={orders} />;
   if (!currentUser) return <LoginModal onLogin={u => { setCurrentUser(u); localStorage.setItem('dg_user', JSON.stringify(u)); }} onBack={() => setIsLandingMode(true)} />;
 
