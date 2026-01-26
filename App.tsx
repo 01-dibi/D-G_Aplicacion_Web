@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, ClipboardList, CheckCircle2, Truck, Search, 
-  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus, Settings, AlertTriangle, Trash2, Layers, ChevronRight, Hash, User, WifiOff, CheckSquare, Square, Check, ArrowLeft
+  Menu, X, Loader2, History, PlusSquare, LogOut, Package, Eraser, Plus, Settings, AlertTriangle, Trash2, Layers, ChevronRight, Hash, User, WifiOff, CheckSquare, Square, Check, ArrowLeft, Database, RefreshCw, Smartphone, Download, FileSpreadsheet
 } from 'lucide-react';
 import { Order, OrderStatus, View } from './types.ts';
 import { supabase, connectionStatus } from './supabaseClient.ts';
@@ -45,7 +45,6 @@ export default function App() {
 
   const fetchOrders = async () => {
     setIsLoading(true);
-    // Solo usamos local si hay un usuario en modo local explícito
     if (currentUser?.mode === 'local') {
       const local = localStorage.getItem('dg_local_orders');
       if (local) setOrders(JSON.parse(local));
@@ -93,9 +92,7 @@ export default function App() {
     }
   };
 
-  // Efecto para manejar la carga de datos inicial y real-time
   useEffect(() => {
-    // Cargamos pedidos si el usuario está logueado O si estamos en modo consulta de clientes
     if (currentUser || isCustomerMode) {
       fetchOrders();
       setIsLandingMode(false);
@@ -163,7 +160,6 @@ export default function App() {
         warehouse: updatedOrder.warehouse,
         package_type: updatedOrder.packageType,
         package_quantity: updatedOrder.packageQuantity,
-        // Fix: Use camelCase properties from the Order interface (detailedPackaging, dispatchType, dispatchValue)
         detailed_packaging: updatedOrder.detailedPackaging,
         customer_name: updatedOrder.customerName,
         customer_number: updatedOrder.customerNumber,
@@ -231,35 +227,62 @@ export default function App() {
     }
   };
 
-  const handleBulkAction = async (newStatus: OrderStatus | 'DELETE') => {
-    if (selectedIds.length === 0) return;
-    if (newStatus === 'DELETE' && !confirm(`¿Eliminar ${selectedIds.length} registros?`)) return;
-    
-    setIsSaving(true);
-    try {
-      if (isLocalMode || currentUser?.mode === 'local') {
-        let newOrders = [...orders];
-        if (newStatus === 'DELETE') {
-          newOrders = orders.filter(o => !selectedIds.includes(o.id));
-        } else {
-          newOrders = orders.map(o => selectedIds.includes(o.id) ? { ...o, status: newStatus } : o);
-        }
-        saveLocalOrders(newOrders);
-      } else {
-        if (newStatus === 'DELETE') {
-          await supabase.from('orders').delete().in('id', selectedIds);
-        } else {
-          await supabase.from('orders').update({ status: newStatus }).in('id', selectedIds);
-        }
-        await fetchOrders();
-      }
-      setSelectedIds([]);
-      setIsSelectionMode(false);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSaving(false);
+  const handleClearCache = () => {
+    if (confirm("¿Estás seguro de limpiar el caché local? Esto cerrará la sesión y recargará la aplicación.")) {
+      localStorage.clear();
+      window.location.reload();
     }
+  };
+
+  const handleExportData = () => {
+    if (orders.length === 0) {
+      alert("No hay datos para exportar.");
+      return;
+    }
+
+    const headers = [
+      "FECHA",
+      "N_PEDIDO",
+      "CTA_CLIENTE",
+      "CLIENTE",
+      "LOCALIDAD",
+      "ESTADO",
+      "RESPONSABLE",
+      "DEPOSITO",
+      "TIPO_BULTO",
+      "CANTIDAD",
+      "DESPACHO_TIPO",
+      "DESPACHO_VALOR",
+      "NOTAS"
+    ];
+
+    const csvContent = orders.map(o => {
+      return [
+        new Date(o.createdAt).toLocaleDateString('es-AR'),
+        `"${o.orderNumber}"`,
+        `"${o.customerNumber}"`,
+        `"${o.customerName?.replace(/"/g, '""')}"`,
+        `"${o.locality?.replace(/"/g, '""')}"`,
+        o.status,
+        `"${o.reviewer?.replace(/"/g, '""') || ''}"`,
+        `"${o.warehouse || ''}"`,
+        `"${o.packageType || ''}"`,
+        o.packageQuantity || 0,
+        `"${o.dispatchType || ''}"`,
+        `"${o.dispatchValue?.replace(/"/g, '""') || ''}"`,
+        `"${o.notes?.replace(/"/g, '""').replace(/\n/g, ' ') || ''}"`
+      ].join(",");
+    });
+
+    const csvString = [headers.join(","), ...csvContent].join("\n");
+    const blob = new Blob(["\ufeff" + csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `DG_LOGISTICA_DB_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   if (isLandingMode) return <LandingScreen onSelectStaff={() => setIsLandingMode(false)} onSelectCustomer={() => { setIsCustomerMode(true); setIsLandingMode(false); }} />;
@@ -320,6 +343,89 @@ export default function App() {
               <div className="w-14 h-14 bg-violet-600 text-white rounded-2xl flex items-center justify-center"><PlusSquare size={28}/></div>
               <div className="text-left"><h4 className="font-bold uppercase text-lg italic text-slate-800">Nueva Carga</h4><p className="text-[10px] font-black tracking-widest text-slate-400 uppercase mt-1">Manual / Inteligencia Artificial</p></div>
             </button>
+          </div>
+        )}
+
+        {!isLoading && view === 'MAINTENANCE' && (
+          <div className="space-y-6 animate-in slide-in-from-bottom duration-400">
+            <div className="flex items-center justify-between px-2 mb-2">
+              <h2 className="font-black italic uppercase text-slate-900 text-xl tracking-tighter">Panel de Configuración</h2>
+              <div className="w-10 h-10 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-lg"><Settings size={18}/></div>
+            </div>
+
+            <div className="bg-white p-6 rounded-[32px] border-2 border-slate-100 shadow-sm space-y-6">
+               <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg ${isLocalMode ? 'bg-amber-500' : 'bg-emerald-500'}`}>
+                    {isLocalMode ? <WifiOff size={24}/> : <Database size={24}/>}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Estado de Red</p>
+                    <h4 className="font-black uppercase text-slate-900 italic">{isLocalMode ? 'MODO LOCAL DESCONECTADO' : 'SINCRO NUBE ACTIVA'}</h4>
+                  </div>
+               </div>
+               <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Órdenes Totales</p>
+                    <p className="text-xl font-black text-slate-900">{orders.length}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Versión App</p>
+                    <p className="text-xl font-black text-slate-900">4.1</p>
+                  </div>
+               </div>
+            </div>
+
+            <div className="space-y-3">
+               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-4">Herramientas</h3>
+               
+               <button 
+                  onClick={handleExportData}
+                  className="w-full bg-white border-2 border-slate-100 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 transition-all shadow-sm group border-b-indigo-500 border-b-4"
+               >
+                  <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                    <FileSpreadsheet size={20}/>
+                  </div>
+                  <div className="text-left">
+                    <h4 className="font-black uppercase text-xs italic text-slate-800">Descargar Base de Datos</h4>
+                    <p className="text-[8px] font-black uppercase text-slate-400 mt-1">Exportar a Excel / CSV</p>
+                  </div>
+               </button>
+
+               <button 
+                  onClick={fetchOrders}
+                  className="w-full bg-white border-2 border-slate-100 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 transition-all shadow-sm group"
+               >
+                  <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                    <RefreshCw size={20}/>
+                  </div>
+                  <div className="text-left">
+                    <h4 className="font-black uppercase text-xs italic text-slate-800">Sincronizar Datos</h4>
+                    <p className="text-[8px] font-black uppercase text-slate-400 mt-1">Forzar descarga desde la nube</p>
+                  </div>
+               </button>
+
+               <button 
+                  onClick={handleClearCache}
+                  className="w-full bg-white border-2 border-slate-100 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 transition-all shadow-sm group"
+               >
+                  <div className="w-10 h-10 bg-red-50 text-red-600 rounded-xl flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-all">
+                    <Eraser size={20}/>
+                  </div>
+                  <div className="text-left">
+                    <h4 className="font-black uppercase text-xs italic text-slate-800">Limpiar Memoria</h4>
+                    <p className="text-[8px] font-black uppercase text-slate-400 mt-1">Borrar caché y reiniciar App</p>
+                  </div>
+               </button>
+
+               <div className="bg-slate-900 text-white p-6 rounded-[32px] flex items-center gap-5 shadow-2xl relative overflow-hidden">
+                  <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12"><Smartphone size={80}/></div>
+                  <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm"><Smartphone size={24}/></div>
+                  <div className="flex-1">
+                    <h4 className="font-black uppercase text-xs italic">Soporte Técnico</h4>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1 tracking-widest">D&G Logística Administrativa</p>
+                  </div>
+               </div>
+            </div>
           </div>
         )}
 
