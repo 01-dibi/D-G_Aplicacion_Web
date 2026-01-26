@@ -36,6 +36,12 @@ export default function App() {
     } catch (e) { return null; }
   });
 
+  // Usuarios autorizados para ver Configuración
+  const isAdminUser = useMemo(() => {
+    const name = currentUser?.name?.toUpperCase() || '';
+    return name === 'ROBERTO' || name === 'ANTONIO';
+  }, [currentUser]);
+
   const [orders, setOrders] = useState<Order[]>([]);
 
   const saveLocalOrders = (newOrders: Order[]) => {
@@ -321,7 +327,9 @@ export default function App() {
               <SidebarItem icon={<CheckCircle2 size={20}/>} label="Preparados" active={view === 'COMPLETED'} onClick={() => { setView('COMPLETED'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<Truck size={20}/>} label="Despachados" active={view === 'DISPATCHED'} onClick={() => { setView('DISPATCHED'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<History size={20}/>} label="Historial" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
-              <SidebarItem icon={<Settings size={20}/>} label="Configuración" active={view === 'MAINTENANCE'} onClick={() => { setView('MAINTENANCE'); setIsSidebarOpen(false); }} />
+              {isAdminUser && (
+                <SidebarItem icon={<Settings size={20}/>} label="Configuración" active={view === 'MAINTENANCE'} onClick={() => { setView('MAINTENANCE'); setIsSidebarOpen(false); }} />
+              )}
             </nav>
             <div className="p-6 border-t bg-slate-50 mt-auto">
                <SidebarItem icon={<LogOut size={20}/>} label="Cerrar Sesión" onClick={() => { setCurrentUser(null); localStorage.removeItem('dg_user'); }} danger />
@@ -346,7 +354,7 @@ export default function App() {
           </div>
         )}
 
-        {!isLoading && view === 'MAINTENANCE' && (
+        {!isLoading && view === 'MAINTENANCE' && isAdminUser && (
           <div className="space-y-6 animate-in slide-in-from-bottom duration-400">
             <div className="flex items-center justify-between px-2 mb-2">
               <h2 className="font-black italic uppercase text-slate-900 text-xl tracking-tighter">Panel de Configuración</h2>
@@ -376,7 +384,7 @@ export default function App() {
             </div>
 
             <div className="space-y-3">
-               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-4">Herramientas</h3>
+               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-4">Herramientas Administrativas</h3>
                
                <button 
                   onClick={handleExportData}
@@ -426,6 +434,17 @@ export default function App() {
                   </div>
                </div>
             </div>
+          </div>
+        )}
+
+        {!isLoading && view === 'MAINTENANCE' && !isAdminUser && (
+          <div className="text-center py-20 animate-in fade-in duration-500">
+            <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle size={40}/>
+            </div>
+            <h3 className="font-black uppercase italic text-slate-900 text-lg">Acceso Denegado</h3>
+            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-2 px-10">Tu perfil no tiene permisos de administrador para ver esta sección.</p>
+            <button onClick={() => setView('DASHBOARD')} className="mt-8 bg-slate-900 text-white px-8 py-3 rounded-2xl font-black uppercase text-[10px]">Volver al Inicio</button>
           </div>
         )}
 
