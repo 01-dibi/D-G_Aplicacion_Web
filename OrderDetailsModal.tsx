@@ -47,12 +47,10 @@ export default function OrderDetailsModal({
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
 
-  // Lógica de Fusión (Merge) mejorada
   const handleLinkOrder = async () => {
     const num = linkOrderInput.trim();
     if (!num) return;
 
-    // Buscar si existe un pedido con ese número para el mismo cliente
     const found = allOrders.find(o => 
       o.orderNumber === num && 
       o.customerNumber === order.customerNumber &&
@@ -66,11 +64,9 @@ export default function OrderDetailsModal({
     let updatedEntries = [...confirmedEntries];
 
     if (found) {
-      // Fusionar bultos del pedido encontrado
       if (found.detailedPackaging && found.detailedPackaging.length > 0) {
         updatedEntries = [...updatedEntries, ...found.detailedPackaging];
       }
-      // Eliminar el pedido duplicado de la base de datos de forma silenciosa
       await onDelete(found.id);
     }
 
@@ -133,18 +129,6 @@ export default function OrderDetailsModal({
     if (await onUpdate(updatedMainOrder)) onClose();
   };
 
-  const handleAddCollaborators = async () => {
-    const input = newCollabInput.trim();
-    if (!input) { setIsAddingCollaborator(false); return; }
-    const newNames = input.split(',').map(n => n.trim().toUpperCase()).filter(n => n !== "");
-    const existingNames = order.reviewer ? order.reviewer.split(',').map(n => n.trim()) : [];
-    const finalReviewerString = Array.from(new Set([...existingNames, ...newNames])).join(', ');
-    if (await onUpdate({ ...order, reviewer: finalReviewerString })) {
-      setNewCollabInput('');
-      setIsAddingCollaborator(false);
-    }
-  };
-
   const actionButtonClass = "w-full py-3.5 rounded-[22px] font-black uppercase text-[10px] flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-md border-b-4";
 
   return (
@@ -179,9 +163,6 @@ export default function OrderDetailsModal({
               <div className="bg-slate-900 text-white px-3 py-2 rounded-2xl flex items-center gap-2 max-w-[140px] truncate">
                 <Users size={11} className="text-orange-500" /><span className="text-[9px] font-black uppercase truncate">{order.reviewer || currentUserName || 'S/N'}</span>
               </div>
-              {!isReadOnly && (
-                <button onClick={() => setIsAddingCollaborator(!isAddingCollaborator)} className="w-9 h-9 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-lg active:scale-90 border-2 border-white"><UserPlus size={16}/></button>
-              )}
             </div>
           </div>
 
@@ -193,6 +174,48 @@ export default function OrderDetailsModal({
               <div className="flex items-center gap-1.5 text-indigo-600"><MapPin size={14}/><span>{order.locality}</span></div>
             </div>
           </div>
+
+          {/* Restauración de Selectores de Depósito y Tipo */}
+          {!isReadOnly && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <p className="text-[8px] font-black text-slate-400 uppercase ml-2">Depósito</p>
+                <select 
+                  className="w-full bg-slate-50 p-3 rounded-xl text-[10px] font-black uppercase border border-slate-100 outline-none"
+                  value={warehouseSelection}
+                  onChange={e => setWarehouseSelection(e.target.value)}
+                >
+                  {warehouses.map(w => <option key={w}>{w}</option>)}
+                </select>
+                {warehouseSelection === 'Otros:' && (
+                  <input 
+                    className="w-full bg-slate-50 p-2 rounded-lg text-[9px] font-black uppercase mt-1 border border-indigo-200" 
+                    placeholder="¿Cuál?" 
+                    value={customWarehouseText} 
+                    onChange={e => setCustomWarehouseText(e.target.value.toUpperCase())} 
+                  />
+                )}
+              </div>
+              <div className="space-y-1">
+                <p className="text-[8px] font-black text-slate-400 uppercase ml-2">Bulto</p>
+                <select 
+                  className="w-full bg-slate-50 p-3 rounded-xl text-[10px] font-black uppercase border border-slate-100 outline-none"
+                  value={packageTypeSelection}
+                  onChange={e => setPackageTypeSelection(e.target.value)}
+                >
+                  {packageTypes.map(p => <option key={p}>{p}</option>)}
+                </select>
+                {packageTypeSelection === 'OTROS:' && (
+                  <input 
+                    className="w-full bg-slate-50 p-2 rounded-lg text-[9px] font-black uppercase mt-1 border border-indigo-200" 
+                    placeholder="¿Cuál?" 
+                    value={customPackageTypeText} 
+                    onChange={e => setCustomPackageTypeText(e.target.value.toUpperCase())} 
+                  />
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3.5">
             <div className="bg-indigo-50/70 p-3 rounded-[24px] border-2 border-indigo-100 text-center">
@@ -209,7 +232,9 @@ export default function OrderDetailsModal({
             <button 
               onClick={async () => { 
                 if (currentQty <= 0) return; 
-                const newEntry = { id: Date.now().toString(), deposit: warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection, type: packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection, quantity: currentQty };
+                const finalDep = warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection;
+                const finalTyp = packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection;
+                const newEntry = { id: Date.now().toString(), deposit: finalDep || 'S/D', type: finalTyp || 'S/D', quantity: currentQty };
                 const newEntries = [...confirmedEntries, newEntry];
                 setConfirmedEntries(newEntries); 
                 setCurrentQty(0);
