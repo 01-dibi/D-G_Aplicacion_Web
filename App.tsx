@@ -36,18 +36,12 @@ export default function App() {
     } catch (e) { return null; }
   });
 
-  // Usuarios autorizados para ver Configuración
   const isAdminUser = useMemo(() => {
     const name = currentUser?.name?.toUpperCase() || '';
     return name === 'ROBERTO' || name === 'ANTONIO';
   }, [currentUser]);
 
   const [orders, setOrders] = useState<Order[]>([]);
-
-  const saveLocalOrders = (newOrders: Order[]) => {
-    localStorage.setItem('dg_local_orders', JSON.stringify(newOrders));
-    setOrders(newOrders);
-  };
 
   const fetchOrders = async () => {
     setIsLoading(true);
@@ -81,8 +75,6 @@ export default function App() {
         warehouse: o.warehouse,
         packageType: o.package_type,
         packageQuantity: o.package_quantity || 0,
-        dispatchType: o.dispatch_type,
-        dispatchValue: o.dispatch_value,
         detailedPackaging: o.detailed_packaging || [],
         createdAt: o.created_at,
         deliveryData: o.delivery_data
@@ -148,11 +140,56 @@ export default function App() {
     );
   }, [orders, globalSearchTerm]);
 
+  // Fix: Added handleCreateOrder to resolve the reference error on line 318
+  const handleCreateOrder = async (orderData: Partial<Order>) => {
+    setIsSaving(true);
+    if (isLocalMode || currentUser?.mode === 'local') {
+      const newOrder: Order = {
+        id: Date.now().toString(),
+        orderNumber: orderData.orderNumber || '',
+        customerNumber: orderData.customerNumber || '',
+        customerName: orderData.customerName || '',
+        locality: orderData.locality || '',
+        status: OrderStatus.PENDING,
+        notes: orderData.notes || '',
+        source: orderData.source || 'Manual',
+        createdAt: new Date().toISOString(),
+      };
+      const updatedOrders = [newOrder, ...orders];
+      setOrders(updatedOrders);
+      localStorage.setItem('dg_local_orders', JSON.stringify(updatedOrders));
+      setIsSaving(false);
+      return true;
+    }
+
+    try {
+      const { error } = await supabase.from('orders').insert([{
+        order_number: orderData.orderNumber,
+        customer_number: orderData.customerNumber,
+        customer_name: orderData.customerName,
+        locality: orderData.locality,
+        notes: orderData.notes || '',
+        status: OrderStatus.PENDING,
+        source: orderData.source || 'Manual'
+      }]);
+      
+      if (error) throw error;
+      await fetchOrders();
+      return true;
+    } catch (err: any) {
+      console.error("Create error:", err);
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleUpdateOrder = async (updatedOrder: Order) => {
     setIsSaving(true);
     if (isLocalMode || currentUser?.mode === 'local') {
       const newOrders = orders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
-      saveLocalOrders(newOrders);
+      setOrders(newOrders);
+      localStorage.setItem('dg_local_orders', JSON.stringify(newOrders));
       setSelectedOrder(updatedOrder);
       setIsSaving(false);
       return true;
@@ -177,8 +214,7 @@ export default function App() {
       }).eq('id', updatedOrder.id);
       
       if (error) throw error;
-      
-      setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      await fetchOrders();
       setSelectedOrder(updatedOrder);
       return true;
     } catch (err: any) {
@@ -189,106 +225,41 @@ export default function App() {
     }
   };
 
-  const handleCreateOrder = async (newOrder: Partial<Order>) => {
-    setIsSaving(true);
-    const reviewerName = currentUser?.name || 'SISTEMA';
-    
+  const handleDeleteOrder = async (id: string) => {
     if (isLocalMode || currentUser?.mode === 'local') {
-      const orderToAdd: Order = {
-        id: Math.random().toString(36).substr(2, 9),
-        orderNumber: newOrder.orderNumber || '',
-        customerNumber: newOrder.customerNumber || '',
-        customerName: newOrder.customerName || '',
-        locality: newOrder.locality || '',
-        notes: newOrder.notes || '',
-        status: OrderStatus.PENDING,
-        source: newOrder.source || 'Manual',
-        reviewer: reviewerName,
-        createdAt: new Date().toISOString()
-      };
-      saveLocalOrders([orderToAdd, ...orders]);
-      setIsSaving(false);
-      return true;
+      const newOrders = orders.filter(o => o.id !== id);
+      setOrders(newOrders);
+      localStorage.setItem('dg_local_orders', JSON.stringify(newOrders));
+      return;
     }
-
-    try {
-      const { error } = await supabase.from('orders').insert([{
-        order_number: newOrder.orderNumber,
-        customer_number: newOrder.customerNumber,
-        customer_name: newOrder.customerName,
-        locality: newOrder.locality,
-        notes: newOrder.notes,
-        status: OrderStatus.PENDING,
-        reviewer: reviewerName,
-        source: newOrder.source || 'Manual'
-      }]);
-      if (error) throw error;
-      await fetchOrders();
-      return true;
-    } catch (err) {
-      console.error("Create error:", err);
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleClearCache = () => {
-    if (confirm("¿Estás seguro de limpiar el caché local? Esto cerrará la sesión y recargará la aplicación.")) {
-      localStorage.clear();
-      window.location.reload();
-    }
+    await supabase.from('orders').delete().eq('id', id);
+    await fetchOrders();
   };
 
   const handleExportData = () => {
-    if (orders.length === 0) {
-      alert("No hay datos para exportar.");
-      return;
-    }
-
-    const headers = [
-      "FECHA",
-      "N_PEDIDO",
-      "CTA_CLIENTE",
-      "CLIENTE",
-      "LOCALIDAD",
-      "ESTADO",
-      "RESPONSABLE",
-      "DEPOSITO",
-      "TIPO_BULTO",
-      "CANTIDAD",
-      "DESPACHO_TIPO",
-      "DESPACHO_VALOR",
-      "NOTAS"
-    ];
-
-    const csvContent = orders.map(o => {
-      return [
-        new Date(o.createdAt).toLocaleDateString('es-AR'),
-        `"${o.orderNumber}"`,
-        `"${o.customerNumber}"`,
-        `"${o.customerName?.replace(/"/g, '""')}"`,
-        `"${o.locality?.replace(/"/g, '""')}"`,
-        o.status,
-        `"${o.reviewer?.replace(/"/g, '""') || ''}"`,
-        `"${o.warehouse || ''}"`,
-        `"${o.packageType || ''}"`,
-        o.packageQuantity || 0,
-        `"${o.dispatchType || ''}"`,
-        `"${o.dispatchValue?.replace(/"/g, '""') || ''}"`,
-        `"${o.notes?.replace(/"/g, '""').replace(/\n/g, ' ') || ''}"`
-      ].join(",");
-    });
-
+    if (orders.length === 0) return;
+    const headers = ["FECHA","N_PEDIDO","CTA_CLIENTE","CLIENTE","LOCALIDAD","ESTADO","RESPONSABLE","DEPOSITO","TIPO_BULTO","CANTIDAD","DESPACHO_TIPO","DESPACHO_VALOR","NOTAS"];
+    const csvContent = orders.map(o => [
+      new Date(o.createdAt).toLocaleDateString('es-AR'),
+      `"${o.orderNumber}"`,
+      `"${o.customerNumber}"`,
+      `"${o.customerName?.replace(/"/g, '""')}"`,
+      `"${o.locality?.replace(/"/g, '""')}"`,
+      o.status,
+      `"${o.reviewer?.replace(/"/g, '""') || ''}"`,
+      `"${o.warehouse || ''}"`,
+      `"${o.packageType || ''}"`,
+      o.packageQuantity || 0,
+      `"${o.dispatchType || ''}"`,
+      `"${o.dispatchValue?.replace(/"/g, '""') || ''}"`,
+      `"${o.notes?.replace(/"/g, '""').replace(/\n/g, ' ') || ''}"`
+    ].join(","));
     const csvString = [headers.join(","), ...csvContent].join("\n");
     const blob = new Blob(["\ufeff" + csvString], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
+    link.setAttribute("href", URL.createObjectURL(blob));
     link.setAttribute("download", `DG_LOGISTICA_DB_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
   };
 
   if (isLandingMode) return <LandingScreen onSelectStaff={() => setIsLandingMode(false)} onSelectCustomer={() => { setIsCustomerMode(true); setIsLandingMode(false); }} />;
@@ -297,16 +268,12 @@ export default function App() {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 pb-28 font-sans relative overflow-x-hidden">
-      {isLocalMode && (
-        <div className="bg-amber-500 text-white text-[8px] font-black uppercase tracking-[0.2em] py-1 px-4 flex items-center justify-center gap-2 sticky top-0 z-[100] shadow-sm">
-          <WifiOff size={10}/> Modo Local (Sin Nube)
-        </div>
-      )}
+      {isLocalMode && <div className="bg-amber-500 text-white text-[8px] font-black uppercase py-1 px-4 text-center sticky top-0 z-[100] shadow-sm"><WifiOff size={10} className="inline mr-2"/> Modo Local</div>}
 
       <header className="bg-slate-900 text-white p-6 rounded-b-[32px] shadow-md flex justify-between items-center sticky top-0 z-50">
         <button onClick={() => setIsSidebarOpen(true)} className="p-2 bg-white/10 rounded-xl active:scale-95"><Menu size={20} /></button>
         <h1 className="text-lg font-bold uppercase italic leading-none text-center">D&G <span className="text-orange-500">Logística</span></h1>
-        <div className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center font-bold cursor-pointer shadow-lg" onClick={fetchOrders}>
+        <div className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center font-bold shadow-lg" onClick={fetchOrders}>
           {isLoading ? <Loader2 className="animate-spin" size={16}/> : currentUser.name[0]}
         </div>
       </header>
@@ -318,7 +285,7 @@ export default function App() {
               <h1 className="text-2xl font-bold italic mb-4 text-orange-500">D&G Logística</h1>
               <div className="flex items-center gap-3">
                  <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center font-black">{currentUser.name[0]}</div>
-                 <div><p className="text-sm font-bold leading-none">{currentUser.name}</p><p className="text-[9px] uppercase tracking-widest text-slate-400 mt-1">{isLocalMode ? 'Operador Local' : 'Sincronizado'}</p></div>
+                 <div><p className="text-sm font-bold leading-none">{currentUser.name}</p></div>
               </div>
             </div>
             <nav className="flex-1 p-4 space-y-1">
@@ -327,19 +294,15 @@ export default function App() {
               <SidebarItem icon={<CheckCircle2 size={20}/>} label="Preparados" active={view === 'COMPLETED'} onClick={() => { setView('COMPLETED'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<Truck size={20}/>} label="Despachados" active={view === 'DISPATCHED'} onClick={() => { setView('DISPATCHED'); setIsSidebarOpen(false); }} />
               <SidebarItem icon={<History size={20}/>} label="Historial" active={view === 'ALL'} onClick={() => { setView('ALL'); setIsSidebarOpen(false); }} />
-              {isAdminUser && (
-                <SidebarItem icon={<Settings size={20}/>} label="Configuración" active={view === 'MAINTENANCE'} onClick={() => { setView('MAINTENANCE'); setIsSidebarOpen(false); }} />
-              )}
+              {isAdminUser && <SidebarItem icon={<Settings size={20}/>} label="Configuración" active={view === 'MAINTENANCE'} onClick={() => { setView('MAINTENANCE'); setIsSidebarOpen(false); }} />}
             </nav>
-            <div className="p-6 border-t bg-slate-50 mt-auto">
-               <SidebarItem icon={<LogOut size={20}/>} label="Cerrar Sesión" onClick={() => { setCurrentUser(null); localStorage.removeItem('dg_user'); }} danger />
-            </div>
+            <div className="p-6 border-t mt-auto"><SidebarItem icon={<LogOut size={20}/>} label="Cerrar Sesión" onClick={() => { setCurrentUser(null); localStorage.removeItem('dg_user'); }} danger /></div>
           </div>
         </div>
       )}
 
       <main className="p-5 space-y-6">
-        {!isLoading && view === 'DASHBOARD' && (
+        {view === 'DASHBOARD' && (
           <div className="space-y-6 animate-in fade-in duration-500">
             <div className="grid grid-cols-2 gap-4">
               <StatCard count={stats.pending} label="Pendientes" color="bg-orange-500" icon={<ClipboardList />} onClick={() => setView('PENDING')} />
@@ -349,186 +312,38 @@ export default function App() {
             </div>
             <button onClick={() => setIsNewOrderModalOpen(true)} className="w-full bg-white border-2 border-slate-100 p-8 rounded-[32px] flex items-center gap-6 shadow-sm active:scale-95 transition-all">
               <div className="w-14 h-14 bg-violet-600 text-white rounded-2xl flex items-center justify-center"><PlusSquare size={28}/></div>
-              <div className="text-left"><h4 className="font-bold uppercase text-lg italic text-slate-800">Nueva Carga</h4><p className="text-[10px] font-black tracking-widest text-slate-400 uppercase mt-1">Manual / Inteligencia Artificial</p></div>
+              <div className="text-left"><h4 className="font-bold uppercase text-lg italic text-slate-800">Nueva Carga</h4></div>
             </button>
           </div>
         )}
 
-        {!isLoading && view === 'MAINTENANCE' && isAdminUser && (
+        {view === 'MAINTENANCE' && isAdminUser && (
           <div className="space-y-6 animate-in slide-in-from-bottom duration-400">
-            <div className="flex items-center justify-between px-2 mb-2">
-              <h2 className="font-black italic uppercase text-slate-900 text-xl tracking-tighter">Panel de Configuración</h2>
-              <div className="w-10 h-10 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-lg"><Settings size={18}/></div>
-            </div>
-
             <div className="bg-white p-6 rounded-[32px] border-2 border-slate-100 shadow-sm space-y-6">
-               <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg ${isLocalMode ? 'bg-amber-500' : 'bg-emerald-500'}`}>
-                    {isLocalMode ? <WifiOff size={24}/> : <Database size={24}/>}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Estado de Red</p>
-                    <h4 className="font-black uppercase text-slate-900 italic">{isLocalMode ? 'MODO LOCAL DESCONECTADO' : 'SINCRO NUBE ACTIVA'}</h4>
-                  </div>
-               </div>
-               <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Órdenes Totales</p>
-                    <p className="text-xl font-black text-slate-900">{orders.length}</p>
-                  </div>
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Versión App</p>
-                    <p className="text-xl font-black text-slate-900">4.1</p>
-                  </div>
-               </div>
-            </div>
-
-            <div className="space-y-3">
-               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] ml-4">Herramientas Administrativas</h3>
-               
-               <button 
-                  onClick={handleExportData}
-                  className="w-full bg-white border-2 border-slate-100 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 transition-all shadow-sm group border-b-indigo-500 border-b-4"
-               >
-                  <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-all">
-                    <FileSpreadsheet size={20}/>
-                  </div>
-                  <div className="text-left">
-                    <h4 className="font-black uppercase text-xs italic text-slate-800">Descargar Base de Datos</h4>
-                    <p className="text-[8px] font-black uppercase text-slate-400 mt-1">Exportar a Excel / CSV</p>
-                  </div>
+               <button onClick={handleExportData} className="w-full bg-emerald-50 text-emerald-600 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 border-b-4 border-emerald-500">
+                 <FileSpreadsheet size={20}/><h4 className="font-black uppercase text-xs italic">Descargar Base de Datos</h4>
                </button>
-
-               <button 
-                  onClick={fetchOrders}
-                  className="w-full bg-white border-2 border-slate-100 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 transition-all shadow-sm group"
-               >
-                  <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                    <RefreshCw size={20}/>
-                  </div>
-                  <div className="text-left">
-                    <h4 className="font-black uppercase text-xs italic text-slate-800">Sincronizar Datos</h4>
-                    <p className="text-[8px] font-black uppercase text-slate-400 mt-1">Forzar descarga desde la nube</p>
-                  </div>
+               <button onClick={fetchOrders} className="w-full bg-indigo-50 text-indigo-600 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 border-b-4 border-indigo-500">
+                 <RefreshCw size={20}/><h4 className="font-black uppercase text-xs italic">Sincronizar</h4>
                </button>
-
-               <button 
-                  onClick={handleClearCache}
-                  className="w-full bg-white border-2 border-slate-100 p-6 rounded-[28px] flex items-center gap-4 active:scale-95 transition-all shadow-sm group"
-               >
-                  <div className="w-10 h-10 bg-red-50 text-red-600 rounded-xl flex items-center justify-center group-hover:bg-red-600 group-hover:text-white transition-all">
-                    <Eraser size={20}/>
-                  </div>
-                  <div className="text-left">
-                    <h4 className="font-black uppercase text-xs italic text-slate-800">Limpiar Memoria</h4>
-                    <p className="text-[8px] font-black uppercase text-slate-400 mt-1">Borrar caché y reiniciar App</p>
-                  </div>
-               </button>
-
-               <div className="bg-slate-900 text-white p-6 rounded-[32px] flex items-center gap-5 shadow-2xl relative overflow-hidden">
-                  <div className="absolute -right-4 -bottom-4 opacity-10 rotate-12"><Smartphone size={80}/></div>
-                  <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-sm"><Smartphone size={24}/></div>
-                  <div className="flex-1">
-                    <h4 className="font-black uppercase text-xs italic">Soporte Técnico</h4>
-                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1 tracking-widest">D&G Logística Administrativa</p>
-                  </div>
-               </div>
             </div>
           </div>
         )}
 
-        {!isLoading && view === 'MAINTENANCE' && !isAdminUser && (
-          <div className="text-center py-20 animate-in fade-in duration-500">
-            <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
-              <AlertTriangle size={40}/>
-            </div>
-            <h3 className="font-black uppercase italic text-slate-900 text-lg">Acceso Denegado</h3>
-            <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mt-2 px-10">Tu perfil no tiene permisos de administrador para ver esta sección.</p>
-            <button onClick={() => setView('DASHBOARD')} className="mt-8 bg-slate-900 text-white px-8 py-3 rounded-2xl font-black uppercase text-[10px]">Volver al Inicio</button>
-          </div>
-        )}
-
-        {!isLoading && view !== 'DASHBOARD' && view !== 'MAINTENANCE' && (
+        {view !== 'DASHBOARD' && view !== 'MAINTENANCE' && (
           <div className="space-y-4 animate-in slide-in-from-bottom duration-400">
-            <div className="flex items-center justify-between px-2">
-              <h2 className="font-black italic uppercase text-slate-900">{view === 'ALL' ? 'Historial' : view}</h2>
-              <button 
-                onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedIds([]); }} 
-                className={`text-[9px] font-black uppercase px-4 py-2 rounded-full border transition-all ${isSelectionMode ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}
-              >
-                {isSelectionMode ? 'CANCELAR' : 'SELECCIONAR'}
-              </button>
-            </div>
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-              <input type="text" placeholder="Filtrar por nombre o N°..." className="w-full bg-white border-2 border-slate-100 rounded-[22px] py-4 pl-12 text-sm font-bold outline-none focus:border-indigo-500 shadow-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <input type="text" placeholder="Filtrar por nombre o N°..." className="w-full bg-white border-2 border-slate-100 rounded-[22px] py-4 pl-12 text-sm font-bold outline-none shadow-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
             <div className="space-y-3">
               {filteredOrders.map(order => (
-                <OrderCard 
-                  key={order.id} 
-                  order={order} 
-                  isSelectionMode={isSelectionMode}
-                  isSelected={selectedIds.includes(order.id)}
-                  onClick={() => isSelectionMode ? setSelectedIds(prev => prev.includes(order.id) ? prev.filter(i => i !== order.id) : [...prev, order.id]) : setSelectedOrder(order)} 
-                />
+                <OrderCard key={order.id} order={order} onClick={() => setSelectedOrder(order)} />
               ))}
             </div>
           </div>
         )}
       </main>
-
-      {isGlobalSearchOpen && (
-        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[3000] flex flex-col p-6 animate-in fade-in duration-300">
-          <header className="flex items-center gap-4 mb-8">
-            <button onClick={() => { setIsGlobalSearchOpen(false); setGlobalSearchTerm(''); }} className="p-3 bg-white/10 text-white rounded-2xl active:scale-95">
-              <ArrowLeft size={24}/>
-            </button>
-            <h2 className="text-white text-xl font-black italic uppercase tracking-tighter">Buscador Universal</h2>
-          </header>
-
-          <div className="relative mb-6">
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={20}/>
-            <input 
-              autoFocus
-              type="text" 
-              placeholder="CLIENTE, N° PEDIDO, LOCALIDAD..." 
-              className="w-full bg-white/10 border border-white/20 text-white p-6 pl-14 rounded-[30px] font-black text-sm uppercase outline-none focus:border-orange-500 shadow-xl" 
-              value={globalSearchTerm} 
-              onChange={e => setGlobalSearchTerm(e.target.value)} 
-            />
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pb-10">
-            {globalFilteredOrders.length > 0 ? globalFilteredOrders.map(order => (
-              <div 
-                key={order.id} 
-                onClick={() => { setSelectedOrder(order); setIsGlobalSearchOpen(false); setGlobalSearchTerm(''); }}
-                className="bg-white/5 border border-white/10 p-5 rounded-[28px] active:scale-95 transition-all flex justify-between items-center group"
-              >
-                <div>
-                  <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest mb-1">#{order.orderNumber} • {order.status}</p>
-                  <h4 className="text-white font-black uppercase italic text-base leading-none group-hover:text-orange-500 transition-colors">{order.customerName}</h4>
-                  <p className="text-white/40 text-[9px] font-black uppercase mt-2">{order.locality}</p>
-                </div>
-                <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center text-white">
-                  <ChevronRight size={18}/>
-                </div>
-              </div>
-            )) : globalSearchTerm.length > 0 ? (
-              <div className="text-center py-20 opacity-30">
-                <Search size={48} className="mx-auto mb-4 text-white" />
-                <p className="font-black uppercase text-[10px] tracking-widest text-white">Sin coincidencias</p>
-              </div>
-            ) : (
-              <div className="text-center py-20 opacity-20">
-                <Package size={60} className="mx-auto mb-4 text-white" />
-                <p className="font-black uppercase text-[10px] tracking-widest leading-relaxed text-white text-center">Busca cualquier dato del pedido<br/>en toda la base de datos</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {selectedOrder && (
         <OrderDetailsModal 
@@ -536,7 +351,7 @@ export default function App() {
           allOrders={orders}
           onClose={() => setSelectedOrder(null)} 
           onUpdate={handleUpdateOrder}
-          onDelete={async (id:string) => { if(confirm("¿Eliminar?")) { await supabase.from('orders').delete().eq('id', id); fetchOrders(); setSelectedOrder(null); } }}
+          onDelete={handleDeleteOrder}
           isSaving={isSaving}
           currentUserName={currentUser?.name}
         />
@@ -544,7 +359,7 @@ export default function App() {
 
       {isNewOrderModalOpen && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[2500] flex items-center justify-center p-5">
-          <div className="bg-white w-full max-md rounded-[40px] p-8 shadow-2xl relative overflow-y-auto max-h-[90vh] no-scrollbar">
+          <div className="bg-white w-full max-md rounded-[40px] p-8 shadow-2xl overflow-y-auto max-h-[90vh] no-scrollbar relative">
             <button onClick={() => setIsNewOrderModalOpen(false)} className="absolute top-8 right-8 text-slate-300"><X/></button>
             <NewOrderForm onAdd={async (d:any) => { const success = await handleCreateOrder(d); if (success) setIsNewOrderModalOpen(false); }} isSaving={isSaving} />
           </div>
@@ -552,30 +367,9 @@ export default function App() {
       )}
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-20 flex justify-around items-center max-w-md mx-auto rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-[1500] px-4">
-        <NavBtn 
-          icon={<Plus size={26}/>} 
-          label="NUEVO" 
-          active={isNewOrderModalOpen} 
-          onClick={() => { setIsNewOrderModalOpen(true); setIsGlobalSearchOpen(false); }} 
-          activeColor="bg-violet-600"
-          baseColor="text-violet-300"
-        />
-        <NavBtn 
-          icon={<LayoutDashboard size={26}/>} 
-          label="DASHBOARD" 
-          active={view === 'DASHBOARD' && !isNewOrderModalOpen && !isGlobalSearchOpen} 
-          onClick={() => { setView('DASHBOARD'); setIsGlobalSearchOpen(false); setIsNewOrderModalOpen(false); }} 
-          activeColor="bg-orange-500"
-          baseColor="text-orange-300"
-        />
-        <NavBtn 
-          icon={<Search size={26}/>} 
-          label="BUSCAR" 
-          active={isGlobalSearchOpen} 
-          onClick={() => { setIsGlobalSearchOpen(true); setIsNewOrderModalOpen(false); }} 
-          activeColor="bg-slate-800"
-          baseColor="text-slate-400"
-        />
+        <NavBtn icon={<Plus size={26}/>} label="NUEVO" active={isNewOrderModalOpen} onClick={() => setIsNewOrderModalOpen(true)} activeColor="bg-violet-600" baseColor="text-violet-300" />
+        <NavBtn icon={<LayoutDashboard size={26}/>} label="DASHBOARD" active={view === 'DASHBOARD' && !isNewOrderModalOpen} onClick={() => setView('DASHBOARD')} activeColor="bg-orange-500" baseColor="text-orange-300" />
+        <NavBtn icon={<Search size={26}/>} label="BUSCAR" active={isGlobalSearchOpen} onClick={() => setIsGlobalSearchOpen(true)} activeColor="bg-slate-800" baseColor="text-slate-400" />
       </nav>
     </div>
   );
