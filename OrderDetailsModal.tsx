@@ -1,7 +1,7 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon, Loader2
+  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon, Loader2, AlertTriangle
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -24,6 +24,7 @@ export default function OrderDetailsModal({
   const [newCollabInput, setNewCollabInput] = useState('');
   const [isLinkingOrder, setIsLinkingOrder] = useState(false);
   const [linkOrderInput, setLinkOrderInput] = useState('');
+  const [dispatchError, setDispatchError] = useState(false);
 
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
   const packageTypes = ["CAJA", "BOLSA:", "PAQUETE", "BOBINA", "OTROS:"];
@@ -39,6 +40,8 @@ export default function OrderDetailsModal({
   const [customPackageTypeText, setCustomPackageTypeText] = useState(!packageTypes.includes(order.packageType || '') ? (order.packageType || '') : '');
   const [currentQty, setCurrentQty] = useState<number>(0);
   const [confirmedEntries, setConfirmedEntries] = useState<PackagingEntry[]>(order.detailedPackaging || []);
+  
+  // Estados de despacho con inicialización robusta
   const [dispatchTypeSelection, setDispatchTypeSelection] = useState(order.dispatchType || dispatchMainTypes[0]);
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
@@ -46,6 +49,11 @@ export default function OrderDetailsModal({
   const totalConfirmedQuantity = useMemo(() => {
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
+
+  // Limpiar error cuando el usuario escribe
+  useEffect(() => {
+    if (dispatchValueSelection || customDispatchText) setDispatchError(false);
+  }, [dispatchValueSelection, customDispatchText]);
 
   const handleLinkOrder = async () => {
     const num = linkOrderInput.trim();
@@ -96,7 +104,9 @@ export default function OrderDetailsModal({
       ...order,
       detailedPackaging: entries,
       packageQuantity: totalQty,
-      reviewer: order.reviewer || currentUserName || 'SISTEMA'
+      reviewer: order.reviewer || currentUserName || 'SISTEMA',
+      dispatchType: dispatchTypeSelection,
+      dispatchValue: (dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL') ? customDispatchText : dispatchValueSelection
     };
     await onUpdate(updatedOrder);
   };
@@ -104,6 +114,16 @@ export default function OrderDetailsModal({
   const handleConfirmStage = async () => {
     if (isSaving || isReadOnly) return;
     
+    // Validar Despacho si se intenta finalizar (pasar de DESPACHADO a FINALIZADO)
+    const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
+    const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
+
+    if (order.status === OrderStatus.DISPATCHED && !finalDispatchValue.trim()) {
+      setDispatchError(true);
+      alert("ATENCIÓN: Debe indicar el tipo de envío o responsable antes de finalizar el pedido.");
+      return;
+    }
+
     let nextStatus: OrderStatus = order.status;
     if (order.status === OrderStatus.PENDING) nextStatus = OrderStatus.COMPLETED;
     else if (order.status === OrderStatus.COMPLETED) nextStatus = OrderStatus.DISPATCHED;
@@ -111,8 +131,6 @@ export default function OrderDetailsModal({
 
     const finalWarehouse = warehouseSelection === 'Otros:' ? customWarehouseText : warehouseSelection;
     const finalPackageType = packageTypeSelection === 'OTROS:' ? customPackageTypeText : packageTypeSelection;
-    const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
-    const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
 
     const updatedMainOrder: Order = {
       ...order,
@@ -175,7 +193,6 @@ export default function OrderDetailsModal({
             </div>
           </div>
 
-          {/* Restauración de Selectores de Depósito y Tipo */}
           {!isReadOnly && (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
@@ -260,20 +277,58 @@ export default function OrderDetailsModal({
             </div>
           )}
 
-          <div className="bg-indigo-600 p-4 rounded-[28px] text-white space-y-2.5 shadow-xl">
-             <h3 className="text-[9px] font-black uppercase italic tracking-[0.2em] opacity-80 flex items-center gap-2"><Activity size={14}/> Despacho</h3>
-             <select disabled={isReadOnly} className="w-full bg-white/10 border border-white/20 rounded-xl py-2 px-3 text-[9px] font-black uppercase outline-none" value={dispatchTypeSelection} onChange={e => setDispatchTypeSelection(e.target.value)}>{dispatchMainTypes.map(t => <option key={t} className="bg-indigo-700">{t}</option>)}</select>
+          <div className={`p-4 rounded-[28px] text-white space-y-2.5 shadow-xl transition-all duration-500 ${dispatchError ? 'bg-red-600 animate-pulse scale-[1.02]' : 'bg-indigo-600'}`}>
+             <div className="flex justify-between items-center">
+               <h3 className="text-[9px] font-black uppercase italic tracking-[0.2em] opacity-80 flex items-center gap-2">
+                 <Activity size={14}/> Despacho
+               </h3>
+               {order.status === OrderStatus.DISPATCHED && (
+                 <span className="text-[8px] font-black bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-1 animate-bounce">
+                   <AlertTriangle size={10}/> OBLIGATORIO
+                 </span>
+               )}
+             </div>
+             
+             <select 
+               disabled={isReadOnly} 
+               className="w-full bg-white/10 border border-white/20 rounded-xl py-2 px-3 text-[9px] font-black uppercase outline-none focus:bg-white/20" 
+               value={dispatchTypeSelection} 
+               onChange={e => setDispatchTypeSelection(e.target.value)}
+             >
+               {dispatchMainTypes.map(t => <option key={t} className="bg-indigo-700">{t}</option>)}
+             </select>
+
              {dispatchOptions[dispatchTypeSelection] ? (
-               <select disabled={isReadOnly} className="w-full bg-white/10 border border-white/20 rounded-xl py-2 px-3 text-[9px] font-black uppercase outline-none" value={dispatchValueSelection} onChange={e => setDispatchValueSelection(e.target.value)}><option value="" className="bg-indigo-700">Responsable...</option>{dispatchOptions[dispatchTypeSelection].map(o => <option key={o} value={o} className="bg-indigo-700">{o}</option>)}</select>
+               <select 
+                 disabled={isReadOnly} 
+                 className={`w-full bg-white/10 border rounded-xl py-2 px-3 text-[9px] font-black uppercase outline-none focus:bg-white/20 ${dispatchError && !dispatchValueSelection ? 'border-yellow-400 border-2' : 'border-white/20'}`} 
+                 value={dispatchValueSelection} 
+                 onChange={e => setDispatchValueSelection(e.target.value)}
+               >
+                 <option value="" className="bg-indigo-700">Responsable...</option>
+                 {dispatchOptions[dispatchTypeSelection].map(o => <option key={o} value={o} className="bg-indigo-700">{o}</option>)}
+               </select>
              ) : (dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL') && (
-               <input disabled={isReadOnly} type="text" placeholder="DETALLE..." className="w-full bg-white/10 border border-white/20 rounded-xl py-2 px-3 text-[9px] font-black uppercase outline-none" value={customDispatchText} onChange={e => setCustomDispatchText(e.target.value.toUpperCase())} />
+               <input 
+                 disabled={isReadOnly} 
+                 type="text" 
+                 placeholder="NOMBRE O DETALLE..." 
+                 className={`w-full bg-white/10 border rounded-xl py-2 px-3 text-[9px] font-black uppercase outline-none focus:bg-white/20 ${dispatchError && !customDispatchText ? 'border-yellow-400 border-2' : 'border-white/20'}`} 
+                 value={customDispatchText} 
+                 onChange={e => setCustomDispatchText(e.target.value.toUpperCase())} 
+               />
              )}
           </div>
 
           <div className="space-y-2.5">
             {!isReadOnly ? (
-              <button onClick={handleConfirmStage} disabled={isSaving} className={`${actionButtonClass} bg-indigo-600 text-white border-indigo-800`}>
-                {isSaving ? <Loader2 className="animate-spin" size={18}/> : <Check size={18} strokeWidth={4}/>} CONFIRMACIÓN DE ETAPA
+              <button 
+                onClick={handleConfirmStage} 
+                disabled={isSaving} 
+                className={`${actionButtonClass} ${order.status === OrderStatus.DISPATCHED ? 'bg-orange-500 border-orange-700' : 'bg-indigo-600 border-indigo-800'} text-white`}
+              >
+                {isSaving ? <Loader2 className="animate-spin" size={18}/> : <Check size={18} strokeWidth={4}/>} 
+                {order.status === OrderStatus.DISPATCHED ? 'FINALIZAR Y ARCHIVAR' : 'CONFIRMACIÓN DE ETAPA'}
               </button>
             ) : (
               <div className="bg-slate-50 p-3.5 rounded-[22px] text-center border-2 border-slate-100"><p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">PEDIDO FINALIZADO</p></div>

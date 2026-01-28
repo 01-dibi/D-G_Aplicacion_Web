@@ -77,7 +77,9 @@ export default function App() {
         packageQuantity: o.package_quantity || 0,
         detailedPackaging: o.detailed_packaging || [],
         createdAt: o.created_at,
-        deliveryData: o.delivery_data
+        deliveryData: o.delivery_data,
+        dispatchType: o.dispatch_type, // Restaurado mapeo de base de datos
+        dispatchValue: o.dispatch_value // Restaurado mapeo de base de datos
       }));
       setOrders(mappedData);
       setIsLocalMode(false);
@@ -140,7 +142,6 @@ export default function App() {
     );
   }, [orders, globalSearchTerm]);
 
-  // Fix: Added handleCreateOrder to resolve the reference error on line 318
   const handleCreateOrder = async (orderData: Partial<Order>) => {
     setIsSaving(true);
     if (isLocalMode || currentUser?.mode === 'local') {
