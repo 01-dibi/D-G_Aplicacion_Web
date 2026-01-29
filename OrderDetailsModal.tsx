@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon, Loader2, AlertTriangle
@@ -41,7 +40,6 @@ export default function OrderDetailsModal({
   const [currentQty, setCurrentQty] = useState<number>(0);
   const [confirmedEntries, setConfirmedEntries] = useState<PackagingEntry[]>(order.detailedPackaging || []);
   
-  // Estados de despacho con inicialización robusta
   const [dispatchTypeSelection, setDispatchTypeSelection] = useState(order.dispatchType || dispatchMainTypes[0]);
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
@@ -50,7 +48,6 @@ export default function OrderDetailsModal({
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
 
-  // Limpiar error cuando el usuario escribe
   useEffect(() => {
     if (dispatchValueSelection || customDispatchText) setDispatchError(false);
   }, [dispatchValueSelection, customDispatchText]);
@@ -98,6 +95,29 @@ export default function OrderDetailsModal({
     }
   };
 
+  const handleAddCollaborator = async () => {
+    const name = newCollabInput.trim().toUpperCase();
+    if (!name) return;
+
+    const currentReviewers = (order.reviewer || currentUserName || 'SISTEMA').toUpperCase();
+    const updatedReviewer = currentReviewers.includes(name) 
+      ? currentReviewers 
+      : `${currentReviewers} + ${name}`;
+
+    const updatedOrder: Order = {
+      ...order,
+      reviewer: updatedReviewer
+    };
+
+    const success = await onUpdate(updatedOrder);
+    if (success) {
+      setNewCollabInput('');
+      setIsAddingCollaborator(false);
+    } else {
+      alert("No se pudo añadir el colaborador.");
+    }
+  };
+
   const persistChanges = async (entries: PackagingEntry[]) => {
     const totalQty = entries.reduce((sum, entry) => sum + entry.quantity, 0);
     const updatedOrder: Order = {
@@ -114,7 +134,6 @@ export default function OrderDetailsModal({
   const handleConfirmStage = async () => {
     if (isSaving || isReadOnly) return;
     
-    // Validar Despacho si se intenta finalizar (pasar de DESPACHADO a FINALIZADO)
     const isCustomDispatch = dispatchTypeSelection === 'TRANSPORTE' || dispatchTypeSelection === 'RETIRO PERSONAL';
     const finalDispatchValue = isCustomDispatch ? customDispatchText : dispatchValueSelection;
 
@@ -160,17 +179,50 @@ export default function OrderDetailsModal({
         <div className="pt-8 space-y-5">
           <div className="flex items-center justify-start gap-2.5">
             {!isReadOnly && (
-              <div className="relative">
-                <button onClick={() => setIsLinkingOrder(!isLinkingOrder)} className="w-9 h-9 bg-orange-500 text-white rounded-xl flex items-center justify-center shadow-lg active:scale-90"><Plus size={18} strokeWidth={3}/></button>
-                {isLinkingOrder && (
-                  <div className="absolute top-full left-0 mt-3 w-64 bg-white border border-slate-100 shadow-2xl rounded-[28px] p-5 z-[1000] animate-in zoom-in">
-                    <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Vincular/Fusionar Pedido</p>
-                    <div className="flex gap-2">
-                      <input className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none" placeholder="N° PEDIDO..." value={linkOrderInput} onChange={e => setLinkOrderInput(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleLinkOrder()} />
-                      <button onClick={handleLinkOrder} className="bg-orange-500 text-white p-3 rounded-xl">{isSaving ? <Loader2 size={16} className="animate-spin"/> : <Check size={18} strokeWidth={4}/>}</button>
+              <div className="flex gap-2">
+                {/* Botón Vincular */}
+                <div className="relative">
+                  <button 
+                    onClick={() => { 
+                      setIsLinkingOrder(!isLinkingOrder); 
+                      setIsAddingCollaborator(false); 
+                    }} 
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-all ${isLinkingOrder ? 'bg-slate-900 text-white' : 'bg-orange-500 text-white'}`}
+                  >
+                    <LinkIcon size={16} strokeWidth={3}/>
+                  </button>
+                  {isLinkingOrder && (
+                    <div className="absolute top-full left-0 mt-3 w-64 bg-white border border-slate-100 shadow-2xl rounded-[28px] p-5 z-[1000] animate-in zoom-in">
+                      <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Vincular/Fusionar Pedido</p>
+                      <div className="flex gap-2">
+                        <input className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none" placeholder="N° PEDIDO..." value={linkOrderInput} onChange={e => setLinkOrderInput(e.target.value)} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleLinkOrder()} />
+                        <button onClick={handleLinkOrder} className="bg-orange-500 text-white p-3 rounded-xl">{isSaving ? <Loader2 size={16} className="animate-spin"/> : <Check size={18} strokeWidth={4}/>}</button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+
+                {/* Botón Colaborador */}
+                <div className="relative">
+                  <button 
+                    onClick={() => { 
+                      setIsAddingCollaborator(!isAddingCollaborator); 
+                      setIsLinkingOrder(false); 
+                    }} 
+                    className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-all ${isAddingCollaborator ? 'bg-slate-900 text-white' : 'bg-indigo-600 text-white'}`}
+                  >
+                    <UserPlus size={18} strokeWidth={3}/>
+                  </button>
+                  {isAddingCollaborator && (
+                    <div className="absolute top-full left-0 mt-3 w-64 bg-white border border-slate-100 shadow-2xl rounded-[28px] p-5 z-[1000] animate-in zoom-in">
+                      <p className="text-[9px] font-black text-slate-400 uppercase italic mb-3">Añadir Colaborador</p>
+                      <div className="flex gap-2">
+                        <input className="flex-1 bg-slate-50 p-3 rounded-xl text-xs font-black uppercase outline-none" placeholder="NOMBRE..." value={newCollabInput} onChange={e => setNewCollabInput(e.target.value.toUpperCase())} autoFocus onKeyDown={(e) => e.key === 'Enter' && handleAddCollaborator()} />
+                        <button onClick={handleAddCollaborator} className="bg-indigo-600 text-white p-3 rounded-xl">{isSaving ? <Loader2 size={16} className="animate-spin"/> : <Check size={18} strokeWidth={4}/>}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
             <div className="bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-2xl flex flex-col min-w-[100px]">
