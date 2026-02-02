@@ -1,6 +1,7 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon, Loader2, AlertTriangle
+  X, MapPin, Plus, Package, Trash, Check, MessageCircle, Hash, Activity, UserPlus, Users, Link as LinkIcon, Loader2, AlertTriangle, Layers, ChevronDown, ChevronUp, CheckCircle2
 } from 'lucide-react';
 import { Order, OrderStatus, PackagingEntry } from './types.ts';
 
@@ -25,6 +26,10 @@ export default function OrderDetailsModal({
   const [linkOrderInput, setLinkOrderInput] = useState('');
   const [dispatchError, setDispatchError] = useState(false);
 
+  // Estados para expansión y confirmación de sectores
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [confirmedSectors, setConfirmedSectors] = useState<Record<string, boolean>>({});
+
   const warehouses = ["Dep. E", "Dep. F:", "Dep. D1:", "Dep. D2:", "Dep. A1:", "Otros:"];
   const packageTypes = ["CAJA", "BOLSA:", "PAQUETE", "BOBINA", "OTROS:"];
   const dispatchMainTypes = ["VIAJANTES", "VENDEDORES", "TRANSPORTE", "RETIRO PERSONAL"];
@@ -44,13 +49,44 @@ export default function OrderDetailsModal({
   const [dispatchValueSelection, setDispatchValueSelection] = useState(order.dispatchValue || '');
   const [customDispatchText, setCustomDispatchText] = useState((order.dispatchType === 'TRANSPORTE' || order.dispatchType === 'RETIRO PERSONAL') ? (order.dispatchValue || '') : '');
 
+  // LÓGICA DE AGRUPACIÓN POR DEPÓSITO PARA VISUALIZACIÓN JERÁRQUICA
+  const groupedEntries = useMemo(() => {
+    const groups: Record<string, { entries: PackagingEntry[], subtotal: number }> = {};
+    confirmedEntries.forEach(entry => {
+      const dep = entry.deposit || 'SIN DEPÓSITO';
+      if (!groups[dep]) {
+        groups[dep] = { entries: [], subtotal: 0 };
+      }
+      groups[dep].entries.push(entry);
+      groups[dep].subtotal += (entry.quantity || 0);
+    });
+    return groups;
+  }, [confirmedEntries]);
+
   const totalConfirmedQuantity = useMemo(() => {
     return confirmedEntries.reduce((sum, entry) => sum + entry.quantity, 0);
   }, [confirmedEntries]);
 
+  // Inicializar grupos expandidos por defecto
+  useEffect(() => {
+    const initialExpanded: Record<string, boolean> = {};
+    Object.keys(groupedEntries).forEach(dep => {
+      initialExpanded[dep] = true;
+    });
+    setExpandedGroups(initialExpanded);
+  }, [Object.keys(groupedEntries).length]);
+
   useEffect(() => {
     if (dispatchValueSelection || customDispatchText) setDispatchError(false);
   }, [dispatchValueSelection, customDispatchText]);
+
+  const toggleGroup = (dep: string) => {
+    setExpandedGroups(prev => ({ ...prev, [dep]: !prev[dep] }));
+  };
+
+  const toggleConfirmSector = (dep: string) => {
+    setConfirmedSectors(prev => ({ ...prev, [dep]: !prev[dep] }));
+  };
 
   const handleLinkOrder = async () => {
     const num = linkOrderInput.trim();
@@ -180,7 +216,6 @@ export default function OrderDetailsModal({
           <div className="flex items-center justify-start gap-2.5">
             {!isReadOnly && (
               <div className="flex gap-2">
-                {/* Botón Vincular */}
                 <div className="relative">
                   <button 
                     onClick={() => { 
@@ -202,7 +237,6 @@ export default function OrderDetailsModal({
                   )}
                 </div>
 
-                {/* Botón Colaborador */}
                 <div className="relative">
                   <button 
                     onClick={() => { 
@@ -292,7 +326,7 @@ export default function OrderDetailsModal({
               <input disabled={isReadOnly} type="number" className="w-full bg-transparent text-xl font-black text-indigo-700 outline-none text-center" value={currentQty || ''} placeholder="0" onChange={e => setCurrentQty(parseInt(e.target.value) || 0)} />
             </div>
             <div className="bg-orange-50/70 p-3 rounded-[24px] border-2 border-orange-100 text-center">
-              <span className="text-[8px] font-black text-orange-400 uppercase">Total Acum.</span>
+              <span className="text-[8px] font-black text-orange-400 uppercase">Total General</span>
               <p className="text-xl font-black text-orange-700">{totalConfirmedQuantity}</p>
             </div>
           </div>
@@ -315,17 +349,76 @@ export default function OrderDetailsModal({
             </button>
           )}
 
+          {/* LISTADO JERÁRQUICO POR DEPÓSITO */}
           {confirmedEntries.length > 0 && (
-            <div className="space-y-2 max-h-32 overflow-y-auto no-scrollbar p-1">
-              {confirmedEntries.map(e => (
-                <div key={e.id} className="flex items-center justify-between bg-white border-2 border-slate-50 p-2.5 rounded-2xl shadow-sm">
-                  <div className="text-left"><p className="text-[8px] font-black text-indigo-500 uppercase italic leading-none">{e.deposit}</p><p className="text-[10px] font-black text-slate-800 uppercase mt-1 tracking-tight">{e.type}</p></div>
-                  <div className="flex items-center gap-3">
-                    <span className="bg-slate-100 px-3 py-1.5 rounded-lg text-xs font-black text-slate-900">{e.quantity}</span>
-                    {!isReadOnly && <button onClick={async () => { const newEntries = confirmedEntries.filter(x => x.id !== e.id); setConfirmedEntries(newEntries); await persistChanges(newEntries); }} className="text-red-400"><Trash size={16}/></button>}
+            <div className="space-y-4 max-h-[300px] overflow-y-auto no-scrollbar p-1 pb-4">
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-center italic">Detalle de Preparación por Sectores</p>
+              
+              {(Object.entries(groupedEntries) as [string, { entries: PackagingEntry[], subtotal: number }][]).map(([depName, group]) => {
+                const isExpanded = expandedGroups[depName] !== false;
+                const isConfirmed = confirmedSectors[depName] === true;
+
+                return (
+                  <div key={depName} className={`space-y-2 animate-in fade-in slide-in-from-left duration-300 ${isConfirmed ? 'opacity-60' : ''}`}>
+                    {/* NIVEL 1: ENCABEZADO DE DEPÓSITO + SUBTOTAL + ACCIONES */}
+                    <div 
+                      className={`flex justify-between items-center px-4 py-3 rounded-[22px] shadow-md sticky top-0 z-10 transition-all ${isConfirmed ? 'bg-emerald-600' : 'bg-slate-900'}`}
+                    >
+                      <div className="flex items-center gap-2 flex-1 cursor-pointer" onClick={() => toggleGroup(depName)}>
+                        <div className="text-orange-500">
+                          {isExpanded ? <ChevronUp size={16} strokeWidth={3}/> : <ChevronDown size={16} strokeWidth={3}/>}
+                        </div>
+                        <span className="text-[10px] font-black uppercase italic tracking-wider text-white truncate max-w-[120px]">{depName}</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-full border border-white/10">
+                          <span className="text-[7px] font-black opacity-60 uppercase text-white">SUB</span>
+                          <span className="text-[11px] font-black text-orange-400 leading-none">{group.subtotal}</span>
+                        </div>
+                        
+                        <button 
+                          onClick={() => toggleConfirmSector(depName)}
+                          className={`p-2 rounded-xl transition-all active:scale-90 ${isConfirmed ? 'bg-white text-emerald-600' : 'bg-white/10 text-white'}`}
+                        >
+                          {isConfirmed ? <CheckCircle2 size={16} strokeWidth={3}/> : <Check size={16} strokeWidth={3}/>}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* NIVEL 2: FILAS DE BULTOS (OCULTABLE) */}
+                    {isExpanded && (
+                      <div className="space-y-1.5 pl-2 animate-in slide-in-from-top-2 duration-200">
+                        {group.entries.map(e => (
+                          <div key={e.id} className="flex items-center justify-between bg-white border border-slate-100 p-3 rounded-[20px] shadow-sm group hover:border-indigo-200 transition-colors">
+                            <div className="text-left flex items-center gap-3">
+                              <div className={`w-1.5 h-1.5 rounded-full ${isConfirmed ? 'bg-emerald-300' : 'bg-indigo-200'}`}></div>
+                              <p className="text-[10px] font-black text-slate-700 uppercase tracking-tight italic">{e.type}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="bg-slate-50 px-3 py-1.5 rounded-xl text-[11px] font-black text-slate-900 border border-slate-100">{e.quantity}</span>
+                              {!isReadOnly && (
+                                <button 
+                                  onClick={async () => { 
+                                    if(confirm("¿Eliminar este registro de bulto?")) {
+                                      const newEntries = confirmedEntries.filter(x => x.id !== e.id); 
+                                      setConfirmedEntries(newEntries); 
+                                      await persistChanges(newEntries); 
+                                    }
+                                  }} 
+                                  className="text-red-300 hover:text-red-500 p-2 transition-colors active:scale-90"
+                                >
+                                  <Trash size={16}/>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
