@@ -78,8 +78,8 @@ export default function App() {
         detailedPackaging: o.detailed_packaging || [],
         createdAt: o.created_at,
         deliveryData: o.delivery_data,
-        dispatchType: o.dispatch_type, // Restaurado mapeo de base de datos
-        dispatchValue: o.dispatch_value // Restaurado mapeo de base de datos
+        dispatchType: o.dispatch_type,
+        dispatchValue: o.dispatch_value 
       }));
       setOrders(mappedData);
       setIsLocalMode(false);
@@ -346,6 +346,63 @@ export default function App() {
         )}
       </main>
 
+      {/* MODAL DE BÚSQUEDA GLOBAL (POSICIONADO PARA EVITAR CONFLICTOS DE RENDERIZADO) */}
+      {isGlobalSearchOpen && (
+        <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[2000] flex flex-col p-6 animate-in fade-in duration-300">
+          <header className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-black italic text-white uppercase tracking-tighter">Búsqueda Global</h2>
+            <button 
+              onClick={() => { setIsGlobalSearchOpen(false); setGlobalSearchTerm(''); }}
+              className="p-3 bg-white/10 text-white rounded-2xl active:scale-90 transition-all hover:bg-white/20"
+            >
+              <X size={24} />
+            </button>
+          </header>
+
+          <div className="relative mb-8">
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={22} />
+            <input 
+              autoFocus
+              type="text" 
+              placeholder="CLIENTE, N° PEDIDO, LOCALIDAD..." 
+              className="w-full bg-white/10 border-2 border-white/20 rounded-[28px] py-6 pl-14 pr-6 text-white font-bold outline-none focus:border-orange-500 transition-all shadow-2xl placeholder:text-slate-500"
+              value={globalSearchTerm}
+              onChange={(e) => setGlobalSearchTerm(e.target.value)}
+            />
+          </div>
+
+          <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-10">
+            {globalSearchTerm.trim() === '' ? (
+              <div className="text-center py-20 opacity-30">
+                <Search size={60} className="mx-auto mb-4 text-white" />
+                <p className="text-white font-black uppercase text-[10px] tracking-widest leading-relaxed">
+                  Ingrese cualquier dato para buscar<br/>en toda la base de datos
+                </p>
+              </div>
+            ) : globalFilteredOrders.length > 0 ? (
+              globalFilteredOrders.map(order => (
+                <OrderCard 
+                  key={order.id} 
+                  order={order} 
+                  onClick={() => {
+                    setSelectedOrder(order);
+                    setIsGlobalSearchOpen(false);
+                    setGlobalSearchTerm('');
+                  }} 
+                />
+              ))
+            ) : (
+              <div className="text-center py-20 opacity-30">
+                <AlertTriangle size={60} className="mx-auto mb-4 text-white" />
+                <p className="text-white font-black uppercase text-[10px] tracking-widest leading-relaxed">
+                  No se encontraron pedidos con: <span className="text-orange-500 italic">{globalSearchTerm}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {selectedOrder && (
         <OrderDetailsModal 
           order={selectedOrder} 
@@ -369,7 +426,7 @@ export default function App() {
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-20 flex justify-around items-center max-w-md mx-auto rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-[1500] px-4">
         <NavBtn icon={<Plus size={26}/>} label="NUEVO" active={isNewOrderModalOpen} onClick={() => setIsNewOrderModalOpen(true)} activeColor="bg-violet-600" baseColor="text-violet-300" />
-        <NavBtn icon={<LayoutDashboard size={26}/>} label="DASHBOARD" active={view === 'DASHBOARD' && !isNewOrderModalOpen} onClick={() => setView('DASHBOARD')} activeColor="bg-orange-500" baseColor="text-orange-300" />
+        <NavBtn icon={<LayoutDashboard size={26}/>} label="DASHBOARD" active={view === 'DASHBOARD' && !isNewOrderModalOpen && !isGlobalSearchOpen} onClick={() => setView('DASHBOARD')} activeColor="bg-orange-500" baseColor="text-orange-300" />
         <NavBtn icon={<Search size={26}/>} label="BUSCAR" active={isGlobalSearchOpen} onClick={() => setIsGlobalSearchOpen(true)} activeColor="bg-slate-800" baseColor="text-slate-400" />
       </nav>
     </div>

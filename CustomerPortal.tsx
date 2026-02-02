@@ -11,7 +11,7 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
 
   /**
    * Ejecuta la búsqueda de forma segura utilizando coincidencia exacta.
-   * No se muestran resultados parciales durante la escritura.
+   * Por seguridad, no se muestran resultados parciales durante la escritura.
    */
   const handleSearch = () => {
     const cleanQuery = query.trim().toLowerCase();
@@ -23,7 +23,7 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
 
     setIsSearching(true);
     
-    // Simulación de delay para feedback visual de proceso de seguridad
+    // Feedback visual del proceso de validación
     setTimeout(() => {
       const filtered = orders?.filter((o: Order) => 
         o.customerNumber?.toString().toLowerCase() === cleanQuery
@@ -53,7 +53,7 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
         <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-900">Consulta Clientes</h2>
       </header>
 
-      {/* Selector de búsqueda segura */}
+      {/* Entrada de búsqueda con disparador explícito */}
       <div className="bg-white p-8 rounded-[40px] shadow-xl space-y-6 border border-slate-100">
         <div className="relative">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18}/>
@@ -65,7 +65,7 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
             value={query} 
             onChange={e => {
               setQuery(e.target.value);
-              if (hasSearched) setHasSearched(false); // Ocultar resultados si el usuario modifica el input
+              if (hasSearched) setHasSearched(false);
             }} 
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           />
@@ -78,11 +78,10 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
           </button>
         </div>
         <p className="text-[9px] font-black text-slate-400 uppercase text-center italic tracking-widest leading-relaxed">
-          Por seguridad, debe ingresar el número completo de cuenta para visualizar su cronología.
+          Debe ingresar su número completo de cuenta para visualizar su cronología personal.
         </p>
       </div>
 
-      {/* Área de resultados */}
       <div className="space-y-6">
         {results.length > 0 ? (
           results.map((o: any) => (
@@ -100,7 +99,7 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
                 <span>{o.locality}</span>
               </div>
               
-              {/* Cronología de etapas */}
+              {/* Timeline de estados */}
               <div className="flex justify-between items-center relative px-1">
                 {[OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED].map((st, idx) => {
                   const statusOrder = [OrderStatus.PENDING, OrderStatus.COMPLETED, OrderStatus.DISPATCHED, OrderStatus.ARCHIVED];
@@ -126,7 +125,6 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
             </div>
           ))
         ) : hasSearched ? (
-          /* Estado: No se encontraron resultados con el número exacto */
           <div className="text-center py-20 bg-white/50 rounded-[40px] border-2 border-dashed border-slate-200 animate-in fade-in duration-500">
             <div className="w-16 h-16 bg-red-50 text-red-400 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle size={32} />
@@ -136,7 +134,6 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
             </p>
           </div>
         ) : (
-          /* Estado inicial: Invitación a buscar */
           <div className="text-center py-20 opacity-40">
             <Package size={60} className="mx-auto mb-4 text-slate-300" />
             <p className="font-black uppercase text-[10px] tracking-widest leading-relaxed text-slate-800">
@@ -146,7 +143,6 @@ export default function CustomerPortal({ onBack, orders }: { onBack: () => void,
         )}
       </div>
 
-      {/* Botón de soporte fijo */}
       <div className="fixed bottom-10 left-1/2 -translate-x-1/2 w-full max-w-md px-8 z-[100]">
         <button 
           onClick={sendGeneralSupportWhatsApp}
