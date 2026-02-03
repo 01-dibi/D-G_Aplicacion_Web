@@ -39,4 +39,13 @@ export interface Order {
   deliveryData?: DeliveryData;
 }
 
+export interface ChatMessage {
+  id: string;
+  created_at: string;
+  sender_name: string;
+  content: string;
+  type: 'user' | 'ai';
+  is_global: boolean;
+}
+
 export type View = 'DASHBOARD' | 'PENDING' | 'COMPLETED' | 'DISPATCHED' | 'ALL' | 'MAINTENANCE';

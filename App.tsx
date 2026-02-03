@@ -9,6 +9,7 @@ import { supabase, connectionStatus } from './supabaseClient.ts';
 import OrderDetailsModal from './OrderDetailsModal.tsx';
 import NewOrderForm from './NewOrderForm.tsx';
 import CustomerPortal from './CustomerPortal.tsx';
+import ChatBot from './ChatBot.tsx';
 import { StatCard, SidebarItem, NavBtn, OrderCard } from './UIComponents.tsx';
 import { LandingScreen, LoginModal } from './LoginComponents.tsx';
 
@@ -346,7 +347,7 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL DE BÚSQUEDA GLOBAL (POSICIONADO PARA EVITAR CONFLICTOS DE RENDERIZADO) */}
+      {/* MODAL DE BÚSQUEDA GLOBAL */}
       {isGlobalSearchOpen && (
         <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[2000] flex flex-col p-6 animate-in fade-in duration-300">
           <header className="flex justify-between items-center mb-6">
@@ -423,6 +424,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* BURBUJA DE CHAT (Solo si el usuario está logueado y no es el portal de clientes) */}
+      {currentUser && !isCustomerMode && <ChatBot currentUser={currentUser} isLowered={isNewOrderModalOpen} />}
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t h-20 flex justify-around items-center max-w-md mx-auto rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-[1500] px-4">
         <NavBtn icon={<Plus size={26}/>} label="NUEVO" active={isNewOrderModalOpen} onClick={() => setIsNewOrderModalOpen(true)} activeColor="bg-violet-600" baseColor="text-violet-300" />
