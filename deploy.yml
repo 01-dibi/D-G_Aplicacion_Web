@@ -8,6 +8,8 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    env:
+      NPM_CONFIG_YES: true
     steps:
       - name: 🚚 Checkout Code
         uses: actions/checkout@v4
@@ -15,14 +17,14 @@ jobs:
       - name: ⚙️ Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: 📦 Install Dependencies
         run: npm install --no-audit --no-fund
 
       - name: 🏗️ Build Project
-        run: npx --no-install vite build
+        run: ./node_modules/.bin/vite build
         env:
           API_KEY: ${{ secrets.VITE_API_KEY }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
