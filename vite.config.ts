@@ -9,9 +9,8 @@ export default defineConfig({
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || '')
   },
   build: {
-    // Incrementamos el límite para evitar la advertencia de Vercel
+    // Optimización de tamaño de chunks para servidores compartidos como Hostinger
     chunkSizeWarningLimit: 1600,
-    // Optimizamos la salida para separar librerías pesadas
     rollupOptions: {
       output: {
         manualChunks(id) {
