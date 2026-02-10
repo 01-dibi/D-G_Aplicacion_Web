@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NPM_CONFIG_YES: true
+      CI: true
     steps:
       - name: 🚚 Checkout Code
         uses: actions/checkout@v4
@@ -21,15 +22,14 @@ jobs:
           cache: 'npm'
 
       - name: 📦 Install Dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci
 
       - name: 🏗️ Build Project
-        run: ./node_modules/.bin/vite build
+        run: npm run build
         env:
           API_KEY: ${{ secrets.VITE_API_KEY }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          CI: true
 
       - name: 🚀 Deploy to Hostinger via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
